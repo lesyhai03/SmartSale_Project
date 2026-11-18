@@ -1,65 +1,91 @@
 # SmartSales Suite
 
-Nền tảng vận hành bán hàng bằng React, TypeScript và Vite. Giao diện hỗ trợ tiếng Việt/Anh, có chế độ Demo và backend Live Node.js/SQLite.
+**Nền tảng quản lý và vận hành bán hàng đa kênh** — xây dựng với React, TypeScript và Node.js, hỗ trợ giao diện tiếng Việt và tiếng Anh.
 
-## Chức năng chính
+> Dự án hiện có chế độ Demo chạy độc lập và backend Live dùng Node.js/SQLite. Một số tích hợp kênh bán hàng và chức năng nâng cao vẫn đang được phát triển.
 
-- **Vận hành:** Tổng quan, hộp thư, khách hàng, chăm sóc, đơn hàng và vận chuyển.
-- **Quản trị:** báo cáo bán hàng/chăm sóc/nhân sự, tài khoản và phân quyền.
-- **Kho & báo giá:** SKU, tồn kho, nhập/xuất/chuyển/kiểm kê và tạo báo giá PDF.
-- **Phân tích thị trường:** nghiên cứu có nguồn dẫn bằng SerpAPI và Google Gemini khi đã cấu hình API.
-- **Sản phẩm & báo cáo:** có một số chức năng nền; thuộc tính nâng cao và bộ tạo báo cáo còn đang phát triển.
+## Tính năng
 
-Inbox và một số luồng Demo dùng dữ liệu mô phỏng; không nhập dữ liệu khách hàng thật. Tích hợp kênh bán hàng, thanh toán và vận chuyển thật chưa hoàn chỉnh. Xem [lộ trình và giới hạn](docs/IMPLEMENTATION_ROADMAP.md).
+- **Vận hành bán hàng:** tổng quan, khách hàng, hộp thư, chăm sóc, đơn hàng và vận chuyển.
+- **Quản trị:** báo cáo, tài khoản nhân viên và phân quyền.
+- **Kho & báo giá:** quản lý SKU, nhập/xuất/chuyển/kiểm kê và xuất báo giá PDF.
+- **Phân tích thị trường:** tạo báo cáo có nguồn tham khảo với Google Gemini và SerpAPI.
+- **Tích hợp:** cấu hình Gemini, SerpAPI, Telegram, Shopee, Lazada và TikTok Shop trong phần Cài đặt.
 
-Hộp thư không tự đồng bộ theo chu kỳ. Tin nhắn mới chỉ được tải khi người dùng bấm **Đồng bộ** tại kết nối kênh hoặc tải lại trang.
+Xem [lộ trình và các giới hạn hiện tại](docs/IMPLEMENTATION_ROADMAP.md) trước khi dùng dữ liệu thật.
 
-## Tải và chạy Demo
+## Công nghệ
 
-1. Tải ZIP của dự án từ trang lưu mã nguồn, giải nén và mở thư mục bằng Terminal.
-2. Cài [Node.js 22.12 trở lên](https://nodejs.org/) và npm.
-3. Cài dependencies và tạo cấu hình local:
+| Thành phần          | Công nghệ               |
+| ------------------- | ----------------------- |
+| Giao diện           | React, TypeScript, Vite |
+| API                 | Node.js                 |
+| Cơ sở dữ liệu local | SQLite                  |
+| Kiểm thử            | Vitest, Testing Library |
 
-   ```powershell
-   npm ci
-   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
-   ```
+## Yêu cầu
 
-4. Mở `.env`, đặt `VITE_APP_MODE=demo`, rồi chạy:
+- Node.js **22.12 trở lên**
+- npm
 
-   ```powershell
-   npm run dev
-   ```
-
-5. Mở `http://127.0.0.1:5173`.
-
-Demo lưu dữ liệu trong trình duyệt; có thể dùng **Cài đặt** để khôi phục dữ liệu mẫu.
-
-## Chạy backend và AI thị trường
-
-Đặt `VITE_APP_MODE=live` trong `.env`. Mở hai terminal trong thư mục dự án:
+## Bắt đầu nhanh — Demo
 
 ```powershell
-# Terminal 1: API kho và phân tích thị trường
+git clone <repository-url>
+cd <project-folder>
+npm ci
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+```
+
+Trong `.env`, đặt:
+
+```env
+VITE_APP_MODE=demo
+```
+
+Chạy ứng dụng:
+
+```powershell
+npm run dev
+```
+
+Mở [http://127.0.0.1:5173](http://127.0.0.1:5173). Demo lưu dữ liệu trong trình duyệt; không dùng dữ liệu khách hàng thật.
+
+## Chạy backend Live
+
+Đặt `VITE_APP_MODE=live` trong `.env`, sau đó mở hai terminal:
+
+```powershell
+# Terminal 1 — API
 npm run server:inventory
 ```
 
 ```powershell
-# Terminal 2: giao diện
+# Terminal 2 — giao diện
 npm run dev
 ```
 
-Tạo tài khoản tại `/register`, đăng nhập bằng owner/admin. Trong **Cài đặt**, nhập và kiểm tra API key Gemini/SerpAPI hoặc bot token Telegram. Để lưu key mã hóa, tạo `INTEGRATION_ENCRYPTION_KEY` một lần trong `.env` bằng lệnh:
+Tạo tài khoản tại `/register` rồi đăng nhập bằng owner/admin. API mặc định chạy tại `http://127.0.0.1:3001`; Vite chuyển tiếp các yêu cầu `/api/v1` trong môi trường phát triển.
+
+### Cấu hình AI và kết nối
+
+Trong **Cài đặt**, nhập và kiểm tra API key Gemini/SerpAPI hoặc bot token Telegram. Để lưu credentials mã hóa phía máy chủ, tạo `INTEGRATION_ENCRYPTION_KEY` một lần:
 
 ```powershell
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 ```
 
-Khởi động lại API sau khi đổi `.env`. Có thể tiếp tục cấu hình khóa mặc định bằng `SERPAPI_API_KEY`, `GEMINI_API_KEY` và `TELEGRAM_BOT_TOKEN`. **Không chia sẻ hoặc đưa các key vào `VITE_*` hay source control.** Xem [hướng dẫn API và AI](docs/inventory-api.md).
+Giữ khóa này bí mật và ổn định; nếu thay đổi, máy chủ không thể giải mã credentials đã lưu. Có thể cấu hình Gemini, SerpAPI và Telegram bằng biến môi trường phía máy chủ tương ứng.
 
-Trong **Cài đặt → Sàn thương mại điện tử**, owner/admin có thể nhập API credentials và access token do Shopee, Lazada hoặc TikTok Shop cấp, kiểm tra API seller chỉ đọc, lưu mã hóa hoặc ngắt cấu hình. Luồng OAuth/callback, tự làm mới token và đồng bộ đơn hàng/sản phẩm chưa được triển khai; kiểm tra thành công không có nghĩa là dữ liệu sàn đã đồng bộ.
+Shopee, Lazada và TikTok Shop hiện hỗ trợ nhập credentials, kiểm tra API seller chỉ đọc, lưu và ngắt kết nối. Luồng OAuth/callback, tự làm mới token và đồng bộ đơn hàng/sản phẩm chưa được triển khai.
 
-## Lệnh kiểm tra
+## Triển khai
+
+Vercel phù hợp để triển khai **giao diện Demo**: đặt `VITE_APP_MODE=demo`, dùng framework preset **Vite** và thư mục build `dist`.
+
+Chế độ Live cần API được triển khai riêng trên máy chủ có lưu trữ dữ liệu bền vững. Backend hiện dùng SQLite trên hệ thống tệp local; không triển khai API này như function tạm thời trên Vercel. Nếu cấu hình giao diện Live, đặt các URL API production phù hợp trong Environment Variables của Vercel và bảo đảm chúng dùng HTTPS.
+
+## Lệnh thường dùng
 
 ```powershell
 npm run typecheck
@@ -68,4 +94,13 @@ npm test
 npm run build
 ```
 
-Tài liệu chi tiết: [API](docs/api-contract.md) · [kiến trúc](docs/architecture.md) · [hướng dẫn kho](docs/inventory-api.md) · [kịch bản Demo](docs/demo-walkthrough.md).
+## Bảo mật và giới hạn
+
+- Không commit `.env`, API keys, access tokens hoặc dữ liệu khách hàng.
+- Không đưa secrets vào biến `VITE_*`; các biến này được đóng gói vào trình duyệt.
+- Hộp thư không tự đồng bộ theo chu kỳ; đồng bộ khi người dùng chủ động thao tác.
+- Demo và một số kênh/tính năng còn mô phỏng hoặc chưa hoàn thiện; xem [lộ trình triển khai](docs/IMPLEMENTATION_ROADMAP.md).
+
+## Tài liệu
+
+[API](docs/api-contract.md) · [Kiến trúc](docs/architecture.md) · [API kho](docs/inventory-api.md) · [Kịch bản Demo](docs/demo-walkthrough.md)

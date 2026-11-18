@@ -1,4 +1,4 @@
-# SmartSales Suite
+# SmartSales
 
 **Nền tảng quản lý và vận hành bán hàng đa kênh** — xây dựng với React, TypeScript và Node.js, hỗ trợ giao diện tiếng Việt và tiếng Anh.
 

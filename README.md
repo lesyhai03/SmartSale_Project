@@ -81,7 +81,7 @@ Shopee, Lazada và TikTok Shop hiện hỗ trợ nhập credentials, kiểm tra 
 
 ## Triển khai
 
-Vercel phù hợp để triển khai **giao diện Demo**: đặt `VITE_APP_MODE=demo`, dùng framework preset **Vite** và thư mục build `dist`.
+Vercel được cấu hình sẵn để triển khai **giao diện Demo**: `vercel.json` chạy `npm run build:vercel` (typecheck và build với mode Demo), xuất bản thư mục `dist` và hỗ trợ các đường dẫn SPA. Không cần thêm biến môi trường để chạy Demo.
 
 Chế độ Live cần API được triển khai riêng trên máy chủ có lưu trữ dữ liệu bền vững. Backend hiện dùng SQLite trên hệ thống tệp local; không triển khai API này như function tạm thời trên Vercel. Nếu cấu hình giao diện Live, đặt các URL API production phù hợp trong Environment Variables của Vercel và bảo đảm chúng dùng HTTPS.
 

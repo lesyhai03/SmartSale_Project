@@ -611,7 +611,9 @@ export function createApiInboxService(baseUrl: string): InboxService {
 }
 
 const configuredMode =
-  import.meta.env.MODE === 'test' || import.meta.env.VITEST === true
+  import.meta.env.MODE === 'test' ||
+  import.meta.env.MODE === 'demo' ||
+  import.meta.env.VITEST === true
     ? 'demo'
     : import.meta.env.VITE_APP_MODE || 'live'
 export const APP_MODE: 'demo' | 'live' = configuredMode === 'live' ? 'live' : 'demo'

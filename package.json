@@ -12,6 +12,7 @@
     "server:inventory": "node --env-file-if-exists=.env --experimental-sqlite server/index.mjs",
     "inventory:admin": "node --experimental-sqlite server/admin.mjs",
     "build": "tsc -b && vite build",
+    "build:vercel": "tsc -b && vite build --mode demo",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -b",
     "test": "node --experimental-sqlite node_modules/vitest/vitest.mjs run",

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { AlertCircle, CheckCircle2, LoaderCircle, RotateCcw, X } from 'lucide-react'
-import { inboxService } from '../../services/inboxService'
+import { APP_MODE, inboxService } from '../../services/inboxService'
 import { useI18n, translateMessage } from '../../i18n'
 import type { CustomerInput, InboxData } from '../../types/inbox'
 import type { OperationsData } from './types'
@@ -145,7 +145,7 @@ export default function OperationsProvider({ children }: { children: ReactNode }
             <button className="button button-primary" onClick={() => void load()}>
               {t('Thử lại', 'Try again')}
             </button>
-            {import.meta.env.VITE_APP_MODE !== 'live' && (
+            {APP_MODE !== 'live' && (
               <button className="button button-secondary" onClick={() => setResetOpen(true)}>
                 <RotateCcw size={14} />
                 {t('Khôi phục dữ liệu vận hành Demo', 'Restore Demo operations')}

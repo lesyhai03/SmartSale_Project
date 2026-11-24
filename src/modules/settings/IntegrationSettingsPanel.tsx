@@ -40,7 +40,6 @@ type MarketplaceDraft = Record<string, string>
 type CredentialDrafts = {
   geminiKey: string
   geminiModel: string
-  serpapiKey: string
   telegramToken: string
   shopee: MarketplaceDraft
   lazada: MarketplaceDraft
@@ -279,8 +278,7 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
   const [credentialNotice, setCredentialNotice] = useState('')
   const [drafts, setDrafts] = useState<CredentialDrafts>({
     geminiKey: '',
-    geminiModel: 'gemini-2.5-flash',
-    serpapiKey: '',
+    geminiModel: 'gemini-3.8-flash',
     telegramToken: '',
     shopee: {
       partnerId: '',
@@ -355,7 +353,6 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
 
   const credentialsFor = (provider: IntegrationProvider): ProviderCredentials => {
     if (provider === 'gemini') return { apiKey: drafts.geminiKey, model: drafts.geminiModel }
-    if (provider === 'serpapi') return { apiKey: drafts.serpapiKey }
     if (provider === 'telegram') return { botToken: drafts.telegramToken }
     if (provider === 'shopee')
       return {
@@ -422,7 +419,6 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
       setDrafts((current) => ({
         ...current,
         ...(provider === 'gemini' ? { geminiKey: '' } : {}),
-        ...(provider === 'serpapi' ? { serpapiKey: '' } : {}),
         ...(provider === 'telegram' ? { telegramToken: '' } : {}),
         ...(provider === 'shopee'
           ? {
@@ -484,6 +480,12 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
   }
 
   const canSaveCredentials = Boolean(settingsStatus?.canSaveCredentials)
+  const canSaveGemini =
+    canSaveCredentials &&
+    Boolean(drafts.geminiModel.trim()) &&
+    Boolean(
+      drafts.geminiKey.trim() || settingsStatus?.providers.gemini.source === 'workspace',
+    )
   const sourceLabel = (provider: IntegrationProvider) =>
     settingsStatus?.providers[provider].source === 'workspace'
       ? t('Cấu hình của doanh nghiệp', 'Workspace configuration')
@@ -570,8 +572,8 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
             <h4>{t('AI và phân tích thị trường', 'AI and market intelligence')}</h4>
             <p>
               {t(
-                'Gemini tổng hợp báo cáo; SerpAPI tìm nguồn web.',
-                'Gemini generates reports; SerpAPI searches the web.',
+                'Gemini tự tìm kiếm trên web và tạo bản phân tích tóm tắt.',
+                'Gemini searches the web and produces a concise analysis.',
               )}
             </p>
           </div>
@@ -598,16 +600,6 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
             <div>
               <ProviderState configured={settingsStatus?.providers.gemini.configured ?? null} />
               <small>{sourceLabel('gemini')}</small>
-            </div>
-          </div>
-          <div className="integration-provider-row">
-            <div>
-              <strong>SerpAPI</strong>
-              <small>{t('Tìm kiếm nguồn công khai', 'Public web search')}</small>
-            </div>
-            <div>
-              <ProviderState configured={settingsStatus?.providers.serpapi.configured ?? null} />
-              <small>{sourceLabel('serpapi')}</small>
             </div>
           </div>
         </div>
@@ -656,7 +648,7 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
                   onChange={(event) =>
                     setDrafts((current) => ({ ...current, geminiModel: event.target.value }))
                   }
-                  placeholder="gemini-2.5-flash"
+                  placeholder="gemini-3.8-flash"
                 />
               </label>
               <div className="integration-credential-actions">
@@ -675,9 +667,7 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
                   type="button"
                   disabled={
                     credentialBusy !== null ||
-                    !canSaveCredentials ||
-                    !drafts.geminiKey.trim() ||
-                    !drafts.geminiModel.trim()
+                    !canSaveGemini
                   }
                   onClick={() => void saveCredentials('gemini')}
                 >
@@ -689,60 +679,6 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
                     type="button"
                     disabled={credentialBusy !== null}
                     onClick={() => void removeCredentials('gemini')}
-                  >
-                    {t('Ngắt kết nối', 'Disconnect')}
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="integration-credential-card">
-              <div>
-                <strong>SerpAPI</strong>
-                <small>{sourceLabel('serpapi')}</small>
-              </div>
-              <label>
-                {t('SerpAPI key', 'SerpAPI key')}
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={drafts.serpapiKey}
-                  onChange={(event) =>
-                    setDrafts((current) => ({ ...current, serpapiKey: event.target.value }))
-                  }
-                  placeholder={
-                    settingsStatus?.providers.serpapi.configured
-                      ? t('Đã có khóa · nhập để thay thế', 'Configured · enter to replace')
-                      : t('Nhập SerpAPI key', 'Enter SerpAPI key')
-                  }
-                />
-              </label>
-              <div className="integration-credential-actions">
-                <button
-                  className="button button-secondary"
-                  type="button"
-                  disabled={credentialBusy !== null || !drafts.serpapiKey.trim()}
-                  onClick={() => void testCredentials('serpapi')}
-                >
-                  {credentialBusy === 'serpapi'
-                    ? t('Đang kiểm tra…', 'Testing…')
-                    : t('Kiểm tra kết nối', 'Test connection')}
-                </button>
-                <button
-                  className="button button-primary"
-                  type="button"
-                  disabled={
-                    credentialBusy !== null || !canSaveCredentials || !drafts.serpapiKey.trim()
-                  }
-                  onClick={() => void saveCredentials('serpapi')}
-                >
-                  {t('Lưu cấu hình', 'Save configuration')}
-                </button>
-                {settingsStatus?.providers.serpapi.source === 'workspace' && (
-                  <button
-                    className="button button-secondary"
-                    type="button"
-                    disabled={credentialBusy !== null}
-                    onClick={() => void removeCredentials('serpapi')}
                   >
                     {t('Ngắt kết nối', 'Disconnect')}
                   </button>
@@ -770,7 +706,6 @@ export default function IntegrationSettingsPanel({ onManageChannels }: Props) {
         <div className="integration-actions">
           <span>
             <code>GEMINI_API_KEY</code>
-            <code>SERPAPI_API_KEY</code>
             <code>GEMINI_MODEL</code>
           </span>
           <Link className="button button-secondary" to="/market-intelligence">

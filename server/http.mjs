@@ -2,6 +2,7 @@ import { createServer } from 'node:http'
 import { createHash, randomBytes } from 'node:crypto'
 import { createQuotationCatalog } from './quotation-catalog.mjs'
 import { createAccounts } from './accounts.mjs'
+import { createAccounting } from './accounting.mjs'
 import { createBusiness } from './business.mjs'
 import { createIntegrationSettings } from './integration-settings.mjs'
 import { createMarketIntelligence } from './market-intelligence.mjs'
@@ -23,6 +24,7 @@ export function createInventoryServer({
   const loginAttempts = new Map()
   const quotationCatalog = createQuotationCatalog(db)
   const accounts = createAccounts(db, { now })
+  const accounting = createAccounting(db, { now })
   const integrations = integrationSettingsService ?? createIntegrationSettings(db)
   const business =
     businessService ??
@@ -71,6 +73,19 @@ export function createInventoryServer({
       .find((value) => value.startsWith('inventory_session='))
     return match?.slice('inventory_session='.length)
   }
+  const recordActivity = (actor) => {
+    const current = now()
+    db.prepare(
+      `UPDATE users SET last_activity_at=?
+      WHERE id=? AND tenant_id=?
+        AND (last_activity_at IS NULL OR last_activity_at<?)`,
+    ).run(
+      current.toISOString(),
+      actor.userId,
+      actor.tenantId,
+      new Date(current.getTime() - 30000).toISOString(),
+    )
+  }
   const authenticate = (token) => {
     if (typeof token !== 'string' || token.length < 32 || token.length > 512)
       throw fail(401, 'UNAUTHENTICATED', 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.')
@@ -82,6 +97,7 @@ export function createInventoryServer({
       )
       .get(hashToken(token), now().toISOString())
     if (!actor) throw fail(401, 'UNAUTHENTICATED', 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.')
+    recordActivity(actor)
     return actor
   }
   const cookie = (token, clear = false) =>
@@ -97,6 +113,11 @@ export function createInventoryServer({
       actor.tenantId,
       new Date(current.getTime() + 28800000).toISOString(),
       current.toISOString(),
+    )
+    db.prepare('UPDATE users SET last_activity_at=? WHERE id=? AND tenant_id=?').run(
+      current.toISOString(),
+      actor.userId,
+      actor.tenantId,
     )
     return cookie(session)
   }
@@ -217,6 +238,9 @@ export function createInventoryServer({
           200,
           accounts.updateUser(actor, userMatch[1], await readJson(request)),
         )
+      const activityMatch = url.pathname.match(/^\/api\/v1\/auth\/users\/([^/]+)\/activity$/)
+      if (activityMatch && method === 'GET')
+        return send(response, 200, accounts.userActivity(actor, pathId(activityMatch[1])))
       if (url.pathname === '/api/v1/inventory/quotation-catalog' && method === 'GET') {
         if (
           [...url.searchParams.keys()].some(
@@ -274,6 +298,53 @@ export function createInventoryServer({
           throw fail(400, 'IDEMPOTENCY_REQUIRED', 'Cần Idempotency-Key từ 8 đến 128 ký tự.')
         return send(response, 200, inventory.command(actor, body.action, body.input, key))
       }
+      if (url.pathname === '/api/v1/accounting/accounts' && method === 'GET') {
+        if (url.searchParams.size)
+          throw fail(400, 'INVALID_FILTER', 'Danh sách tài khoản không nhận bộ lọc.')
+        return send(response, 200, accounting.listAccounts(actor))
+      }
+      if (url.pathname === '/api/v1/accounting/trial-balance' && method === 'GET') {
+        const allowed = ['from', 'to']
+        if (
+          [...url.searchParams.keys()].some(
+            (key) => !allowed.includes(key) || url.searchParams.getAll(key).length !== 1,
+          )
+        )
+          throw fail(400, 'INVALID_FILTER', 'Bộ lọc bảng cân đối thử không hợp lệ.')
+        return send(response, 200, accounting.trialBalance(actor, Object.fromEntries(url.searchParams)))
+      }
+      if (url.pathname === '/api/v1/accounting/journals' && method === 'GET') {
+        const allowed = ['from', 'to', 'accountCode', 'limit', 'offset']
+        if (
+          [...url.searchParams.keys()].some(
+            (key) => !allowed.includes(key) || url.searchParams.getAll(key).length !== 1,
+          )
+        )
+          throw fail(400, 'INVALID_FILTER', 'Bộ lọc sổ nhật ký không hợp lệ.')
+        const filters = Object.fromEntries(url.searchParams)
+        for (const key of ['limit', 'offset']) {
+          if (filters[key] === undefined) continue
+          if (!/^(0|[1-9]\d*)$/.test(filters[key]) || !Number.isSafeInteger(Number(filters[key])))
+            throw fail(400, 'INVALID_FILTER', 'Phân trang cần là số nguyên hợp lệ.')
+          filters[key] = Number(filters[key])
+        }
+        return send(response, 200, accounting.listJournals(actor, filters))
+      }
+      if (url.pathname === '/api/v1/accounting/journals' && method === 'POST')
+        return send(response, 201, accounting.createJournal(actor, await readJson(request)))
+      const accountingReversalMatch = url.pathname.match(
+        /^\/api\/v1\/accounting\/journals\/([^/]+)\/reverse$/,
+      )
+      if (accountingReversalMatch && method === 'POST')
+        return send(
+          response,
+          201,
+          accounting.reverseJournal(
+            actor,
+            pathId(accountingReversalMatch[1]),
+            await readJson(request),
+          ),
+        )
       if (url.pathname === '/api/v1/market-intelligence/status' && method === 'GET')
         return send(response, 200, marketIntelligence.status(actor))
       if (url.pathname === '/api/v1/market-intelligence/runs' && method === 'GET')

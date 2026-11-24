@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Package, Plus, Trash2 } from 'lucide-react'
 import { Modal } from '../../components/shared'
 import { useI18n } from '../../i18n'
 import { dateTime, money } from '../operations/domain'
 import type { RunCommand } from './InventoryForms'
+import { InventoryApiError } from './service'
 import type { InventorySnapshot } from './types'
 import type { InventorySalesOrder } from './salesTypes'
+import { RestockRequestCreateForm } from './PurchaseOrderForms'
 
 interface Props {
   data: InventorySnapshot & { salesOrders?: InventorySalesOrder[] }
@@ -479,7 +481,20 @@ export function SalesActionForm({
   const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [stockInsufficient, setStockInsufficient] = useState(false)
+  const [restockOpen, setRestockOpen] = useState(false)
   const returning = kind === 'return'
+  const requestedBySku = new Map<string, number>()
+  if (kind === 'confirm') {
+    for (const line of order.lines)
+      requestedBySku.set(line.skuId, (requestedBySku.get(line.skuId) ?? 0) + line.quantity)
+  }
+  const restockLines = [...requestedBySku].flatMap(([skuId, requestedQuantity]) => {
+    const available = data.balances
+      .filter((balance) => balance.warehouseId === order.warehouseId && balance.skuId === skuId)
+      .reduce((total, balance) => total + balance.available, 0)
+    return available < requestedQuantity ? [{ skuId, requestedQuantity }] : []
+  })
   const title = {
     confirm: t('Xác nhận & giữ hàng', 'Confirm & reserve'),
     cancel: t('Hủy đơn bán', 'Cancel sales order'),
@@ -491,6 +506,7 @@ export function SalesActionForm({
     if (busy) return
     const fields = new FormData(event.currentTarget)
     setError('')
+    setStockInsufficient(false)
     setBusy(true)
     try {
       const lineInputs = order.lines.flatMap((line) => {
@@ -525,9 +541,35 @@ export function SalesActionForm({
           ? cause.message
           : t('Không thể lưu nghiệp vụ.', 'Unable to save operation.'),
       )
+      setStockInsufficient(
+        kind === 'confirm' &&
+          data.permissions.includes('purchaseRequest.create') &&
+          restockLines.length > 0 &&
+          cause instanceof InventoryApiError &&
+          cause.code === 'INSUFFICIENT_STOCK',
+      )
     } finally {
       setBusy(false)
     }
+  }
+  if (restockOpen) {
+    return (
+      <RestockRequestCreateForm
+        data={data}
+        run={run}
+        initialRequest={{
+          warehouseId: order.warehouseId,
+          sourceReference: order.number,
+          note: t(
+            `Phát sinh do đơn bán ${order.number} không đủ tồn để giữ hàng.`,
+            `Requested because sales order ${order.number} could not reserve available stock.`,
+          ),
+          lines: restockLines,
+        }}
+        onClose={() => setRestockOpen(false)}
+        onCreated={onClose}
+      />
+    )
   }
   return (
     <Modal
@@ -617,9 +659,20 @@ export function SalesActionForm({
           )}
         </fieldset>
         {error && (
-          <p role="alert" className="inv-error">
-            {error}
-          </p>
+          <div className="inv-error" role="alert">
+            <p>{error}</p>
+            {stockInsufficient && (
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={busy}
+                onClick={() => setRestockOpen(true)}
+              >
+                <Package size={14} />
+                {t('Tạo yêu cầu nhập hàng', 'Create restock request')}
+              </button>
+            )}
+          </div>
         )}
         <div className="inv-form-actions">
           <button

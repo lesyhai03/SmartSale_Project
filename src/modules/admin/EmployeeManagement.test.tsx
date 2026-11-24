@@ -14,6 +14,8 @@ const userFixture = [
     email: 'owner@example.com',
     role: 'owner',
     active: true,
+    isOnline: true,
+    lastActivityAt: new Date().toISOString(),
   },
   {
     id: 'employee-a',
@@ -21,6 +23,8 @@ const userFixture = [
     email: 'stock@example.com',
     role: 'receiver',
     active: true,
+    isOnline: false,
+    lastActivityAt: '2026-11-17T02:00:00.000Z',
   },
 ]
 
@@ -51,6 +55,17 @@ beforeEach(() => {
       succeeded: true,
       remoteAddress: '127.0.0.1',
       userAgent: 'test',
+      createdAt: '2026-11-18T02:00:00.000Z',
+    },
+  ])
+  vi.spyOn(inventoryService, 'listUserActivity').mockResolvedValue([
+    {
+      id: 'activity-event-a',
+      kind: 'action',
+      action: 'order.created',
+      entityId: 'order-1',
+      description: 'Tạo đơn bán SO-1.',
+      succeeded: null,
       createdAt: '2026-11-18T02:00:00.000Z',
     },
   ])
@@ -91,6 +106,60 @@ describe('admin employee management', () => {
     )
   })
 
+  it('lets an owner create a dedicated administrator account', async () => {
+    const user = userEvent.setup()
+    renderManagement()
+
+    await screen.findByText('owner@example.com')
+    await user.click(screen.getByRole('button', { name: 'Tạo tài khoản' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Tạo tài khoản nhân viên' }))
+    await user.selectOptions(dialog.getByLabelText('Vai trò *'), 'admin')
+    await user.type(dialog.getByLabelText('Họ tên nhân viên *'), 'Quản trị hệ thống')
+    await user.type(dialog.getByLabelText('Email đăng nhập *'), 'admin@example.com')
+    await user.type(dialog.getByLabelText('Mật khẩu ban đầu *'), 'secure-password-123')
+    await user.click(dialog.getByRole('button', { name: 'Tạo tài khoản' }))
+
+    await waitFor(() =>
+      expect(inventoryService.createUser).toHaveBeenCalledWith({
+        name: 'Quản trị hệ thống',
+        email: 'admin@example.com',
+        password: 'secure-password-123',
+        role: 'admin',
+      }),
+    )
+  })
+
+  it('filters the account directory by employee name or email', async () => {
+    const user = userEvent.setup()
+    renderManagement()
+
+    await screen.findByText('owner@example.com')
+    expect(screen.getByText('Tổng tài khoản')).toBeInTheDocument()
+    expect(screen.getByText('Quyền phân hệ')).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: 'Tìm theo tên hoặc email' }), 'stock@')
+
+    expect(screen.getByText('stock@example.com')).toBeInTheDocument()
+    expect(screen.queryByText('owner@example.com')).not.toBeInTheDocument()
+  })
+
+  it('updates an employee role and explains that custom permissions are reset', async () => {
+    const user = userEvent.setup()
+    renderManagement()
+
+    await screen.findByText('stock@example.com')
+    await user.click(screen.getByRole('button', { name: 'Thao tác tài khoản · Nhân viên kho' }))
+    await user.click(screen.getByRole('button', { name: 'Đổi vai trò · Nhân viên kho' }))
+    const roleDialog = screen.getByRole('dialog', { name: 'Đổi vai trò · Nhân viên kho' })
+    const dialog = within(roleDialog)
+    expect(roleDialog).toHaveTextContent('xóa quyền tùy chỉnh')
+    await user.selectOptions(dialog.getByLabelText('Vai trò mới *'), 'manager')
+    await user.click(dialog.getByRole('button', { name: 'Lưu vai trò' }))
+
+    await waitFor(() =>
+      expect(inventoryService.updateUser).toHaveBeenCalledWith('employee-a', { role: 'manager' }),
+    )
+  })
+
   it('lets administrators review sign-ins, reset passwords and adjust permissions', async () => {
     const user = userEvent.setup()
     renderManagement()
@@ -102,6 +171,7 @@ describe('admin employee management', () => {
     )
     await user.keyboard('{Escape}')
 
+    await user.click(screen.getByRole('button', { name: 'Thao tác tài khoản · Nhân viên kho' }))
     await user.click(screen.getByRole('button', { name: 'Đặt lại mật khẩu' }))
     const passwordDialog = within(screen.getByRole('dialog', { name: 'Đặt lại mật khẩu' }))
     await user.type(passwordDialog.getByLabelText('Mật khẩu mới *'), 'new-secure-password-123')
@@ -113,6 +183,7 @@ describe('admin employee management', () => {
       ),
     )
 
+    await user.click(screen.getByRole('button', { name: 'Thao tác tài khoản · Nhân viên kho' }))
     await user.click(screen.getByRole('button', { name: 'Phân quyền' }))
     const permissions = within(
       await screen.findByRole('dialog', { name: 'Phân quyền · Nhân viên kho' }),
@@ -131,5 +202,20 @@ describe('admin employee management', () => {
         { permission: 'document.create', granted: null },
       ]),
     )
+  })
+
+  it('shows the actual online state and the selected employee activity history', async () => {
+    const user = userEvent.setup()
+    renderManagement()
+
+    await screen.findByText('stock@example.com')
+    expect(screen.getByText('Ngoại tuyến')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Lịch sử hoạt động · Nhân viên kho' }))
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Lịch sử hoạt động · Nhân viên kho',
+    })
+    expect(dialog).toHaveTextContent('Tạo đơn hàng')
+    expect(dialog).toHaveTextContent('Tạo đơn bán SO-1.')
+    expect(inventoryService.listUserActivity).toHaveBeenCalledWith('employee-a')
   })
 })

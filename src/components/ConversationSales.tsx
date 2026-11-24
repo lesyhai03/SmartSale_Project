@@ -5,27 +5,24 @@ import {
   Package,
   Plus,
   RefreshCw,
+  Search,
   ShoppingBag,
-  Sparkles,
 } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import type { Conversation, Customer, InboxData } from '../types/inbox'
+import type { Conversation, Customer } from '../types/inbox'
 import type { Product } from '../modules/operations/types'
 import type { PurchaseAnalysis } from '../types/purchase'
 import type { InventorySnapshot } from '../modules/inventory/types'
 import type { SalesOrderSeedLine } from '../modules/inventory/SalesOrderPanel'
 import { SalesOrderCreateForm } from '../modules/inventory/SalesOrderPanel'
 import { inventoryService, InventoryApiError } from '../modules/inventory/service'
-import { purchaseService } from '../services/purchaseService'
-import { conversationRevision } from '../lib/purchase'
+import { analyzePurchaseDemo, conversationRevision } from '../lib/purchase'
 import { useI18n } from '../i18n'
 import { Modal } from './shared'
 
 interface Props {
   conversation: Conversation
   customer: Customer
-  inbox: InboxData
-  mode: 'demo' | 'live'
   onNotify: (text: string, kind?: 'success' | 'error') => void
   onClose: () => void
 }
@@ -38,7 +35,6 @@ interface SalesDraft {
 export default function ConversationSales({
   conversation,
   customer,
-  mode,
   onNotify,
   onClose,
 }: Props) {
@@ -48,12 +44,9 @@ export default function ConversationSales({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [analysis, setAnalysis] = useState<PurchaseAnalysis | null>(null)
-  const [analyzing, setAnalyzing] = useState(false)
   const [form, setForm] = useState<SalesDraft | null>(null)
   const [createdId, setCreatedId] = useState('')
-  const controller = useRef<AbortController | null>(null)
   const loadLock = useRef(false)
-  const analyzeLock = useRef(false)
   const mutationLock = useRef(false)
   const mounted = useRef(true)
   const revision = conversationRevision(conversation)
@@ -104,31 +97,19 @@ export default function ConversationSales({
     void load()
     return () => {
       mounted.current = false
-      controller.current?.abort()
     }
   }, [load])
-  const analyze = async () => {
-    if (!data || analyzeLock.current) return
-    analyzeLock.current = true
-    setAnalyzing(true)
+  const analyze = () => {
+    if (!data) return
     setError('')
-    controller.current?.abort()
-    controller.current = new AbortController()
     try {
-      const result = await purchaseService.analyze(
-        conversation,
-        inventoryProducts,
-        controller.current.signal,
-      )
-      if (mounted.current) setAnalysis(result)
+      setAnalysis(analyzePurchaseDemo(conversation, inventoryProducts))
     } catch (cause) {
-      if (mounted.current)
-        setError(
-          cause instanceof Error ? cause.message : t('Phân tích thất bại.', 'Analysis failed.'),
-        )
-    } finally {
-      analyzeLock.current = false
-      if (mounted.current) setAnalyzing(false)
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : t('Không tìm được sản phẩm trong tin nhắn.', 'Unable to match products in messages.'),
+      )
     }
   }
   const openOrder = (fromAnalysis: boolean) => {
@@ -159,9 +140,7 @@ export default function ConversationSales({
     try {
       const next = await inventoryService.command(action, input)
       if (mounted.current) setData(next)
-      onNotify(
-        t('Đơn bán đã được lưu trên hệ thống kho.', 'Sales order saved to the inventory system.'),
-      )
+      onNotify(t('Đơn bán đã được lưu trên hệ thống kho.', 'Sales order saved to the inventory system.'))
       return next
     } catch (cause) {
       const message =
@@ -247,21 +226,17 @@ export default function ConversationSales({
             <>
               <div className="sales-analysis-controls">
                 <span className="sales-mode">
-                  {mode === 'demo'
-                    ? t('DEMO · Phân tích theo quy tắc', 'DEMO · Rule-based analysis')
-                    : t('AI · Phân tích trên máy chủ', 'AI · Server analysis')}
+                  {t('Đối chiếu từ khóa trong tin nhắn', 'Match keywords in customer messages')}
                 </span>
                 <button
                   className="button button-secondary"
-                  disabled={analyzing || inventoryProducts.length === 0}
-                  onClick={() => void analyze()}
+                  disabled={inventoryProducts.length === 0}
+                  onClick={analyze}
                 >
-                  <Sparkles size={13} className={analyzing ? 'spin' : ''} />
-                  {analyzing
-                    ? t('Đang phân tích…', 'Analyzing…')
-                    : analysis
-                      ? t('Phân tích lại', 'Analyze again')
-                      : t('Phân tích nhu cầu mua', 'Analyze purchase intent')}
+                  <Search size={13} />
+                  {analysis
+                    ? t('Tìm lại sản phẩm', 'Search again')
+                    : t('Tìm sản phẩm trong tin nhắn', 'Find products in messages')}
                 </button>
               </div>
               {!inventoryProducts.length && (
@@ -293,7 +268,7 @@ export default function ConversationSales({
                   <strong className={`purchase-intent intent-${analysis.intent}`}>
                     {summary[analysis.intent]}
                   </strong>
-                  {mode === 'live' && <p>{analysis.summary}</p>}
+                  <p>{analysis.summary}</p>
                   {analysis.items.map((item) => {
                     const product = inventoryProducts.find((record) => record.id === item.productId)
                     if (!product) return null
@@ -340,10 +315,12 @@ export default function ConversationSales({
                   )}
                   {analysis.items.length > 0 &&
                     ['purchase', 'inquiry'].includes(analysis.intent) && (
-                      <button className="button button-primary" onClick={() => openOrder(true)}>
-                        <ShoppingBag size={14} />
-                        {t('Điền đơn từ gợi ý', 'Fill order from suggestions')}
-                      </button>
+                      <div className="inv-actions">
+                        <button className="button button-primary" onClick={() => openOrder(true)}>
+                          <ShoppingBag size={14} />
+                          {t('Điền đơn từ gợi ý', 'Fill order from suggestions')}
+                        </button>
+                      </div>
                     )}
                 </div>
               )}
@@ -378,7 +355,7 @@ export default function ConversationSales({
               <p>{error}</p>
               <button
                 className="button button-secondary"
-                disabled={loading || analyzing}
+                disabled={loading}
                 onClick={() => void load()}
               >
                 <RefreshCw size={12} />

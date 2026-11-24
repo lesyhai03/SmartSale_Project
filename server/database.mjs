@@ -43,22 +43,30 @@ export function openDatabase(path = ':memory:') {
       .sort()) {
       const sql = readFileSync(join(directory, file), 'utf8')
       const checksum = createHash('sha256').update(sql).digest('hex')
-      transaction(db, () => {
-        const existing = db
-          .prepare('SELECT checksum FROM schema_migrations WHERE version = ?')
-          .get(file)
-        if (existing) {
-          if (existing.checksum !== checksum)
-            throw new Error(`Migration checksum mismatch: ${file}`)
-          return
-        }
-        db.exec(sql)
-        db.prepare('INSERT INTO schema_migrations VALUES (?,?,?)').run(
-          file,
-          checksum,
-          new Date().toISOString(),
-        )
-      })
+      const foreignKeysOff = /^\s*PRAGMA foreign_keys\s*=\s*OFF\s*;/i.test(sql)
+      if (foreignKeysOff) db.exec('PRAGMA foreign_keys = OFF')
+      try {
+        transaction(db, () => {
+          const existing = db
+            .prepare('SELECT checksum FROM schema_migrations WHERE version = ?')
+            .get(file)
+          if (existing) {
+            if (existing.checksum !== checksum)
+              throw new Error(`Migration checksum mismatch: ${file}`)
+            return
+          }
+          db.exec(sql)
+          db.prepare('INSERT INTO schema_migrations VALUES (?,?,?)').run(
+            file,
+            checksum,
+            new Date().toISOString(),
+          )
+        })
+        if (foreignKeysOff && db.prepare('PRAGMA foreign_key_check').all().length)
+          throw new Error(`Foreign key check failed after migration: ${file}`)
+      } finally {
+        if (foreignKeysOff) db.exec('PRAGMA foreign_keys = ON')
+      }
     }
     return db
   } catch (error) {

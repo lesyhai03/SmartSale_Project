@@ -6,7 +6,7 @@ import { createIntegrationSettings } from './integration-settings.mjs'
 import { createInventoryServer } from './http.mjs'
 
 const db = openDatabase(resolve(process.env.INVENTORY_DB_PATH || 'var/inventory.sqlite'))
-const port = Number(process.env.INVENTORY_PORT || 3001)
+const port = Number(process.env.INVENTORY_PORT || 3002)
 if (!Number.isInteger(port) || port < 1 || port > 65535)
   throw new Error('INVENTORY_PORT không hợp lệ.')
 const inventory = createInventory(db)

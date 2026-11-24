@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import I18nProvider from '../../i18n/I18nProvider'
 import InventoryAuthPage from '../inventory/InventoryAuthPage'
-import { inventoryService } from '../inventory/service'
+import { InventoryApiError, inventoryService } from '../inventory/service'
 import type { InventorySnapshot } from '../inventory/types'
 import { OperationsContext } from '../operations/context'
 import type { OperationsContextValue } from '../operations/context'
@@ -65,6 +65,7 @@ const snapshot = (): InventorySnapshot => ({
     },
   ],
   documents: [],
+  purchaseRequests: [],
   purchaseOrders: [],
   salesOrders: [],
   ledger: [],
@@ -225,6 +226,150 @@ it('opens a prefilled canonical order form from a customer profile link', async 
   expect(form.getByRole('combobox', { name: 'Khách hàng' })).toHaveValue('customer-a')
   expect(form.getByRole('textbox', { name: 'Tên người nhận' })).toHaveValue('Khách A')
   expect(form.getByRole('textbox', { name: 'Số điện thoại' })).toHaveValue('0901234567')
+})
+
+it('offers a prefilled restock request when confirming a sales order fails for insufficient stock', async () => {
+  const value = snapshot()
+  value.permissions.push('salesOrder.confirm', 'purchaseRequest.create')
+  value.salesOrders = [
+    {
+      id: 'sales-a',
+      number: 'SO-20261123-001',
+      warehouseId: 'warehouse-a',
+      customerReference: 'Khách A',
+      reference: 'WEB-1',
+      note: '',
+      status: 'draft',
+      fulfillmentDocumentId: null,
+      createdAt: '2026-11-23T09:00:00Z',
+      lines: [
+        {
+          id: 'sales-line-a',
+          skuId: 'sku-a',
+          sku: 'REAL-001',
+          name: 'Sản phẩm thật',
+          quantity: 6,
+          unitPrice: 250000,
+          locationId: 'default',
+          reservationId: null,
+          returnedQuantity: 0,
+          returnableQuantity: 6,
+        },
+        {
+          id: 'sales-line-b',
+          skuId: 'sku-a',
+          sku: 'REAL-001',
+          name: 'Sản phẩm thật',
+          quantity: 2,
+          unitPrice: 250000,
+          locationId: 'default',
+          reservationId: null,
+          returnedQuantity: 0,
+          returnableQuantity: 2,
+        },
+      ],
+    },
+  ]
+  vi.mocked(inventoryService.load).mockResolvedValue(value)
+  vi.mocked(inventoryService.command).mockImplementation(async (action) => {
+    if (action === 'salesOrder.confirm')
+      throw new InventoryApiError(409, 'INSUFFICIENT_STOCK', 'Tồn khả dụng không đủ để giữ hàng.')
+    return {
+      ...value,
+      purchaseRequests: [
+        {
+          id: 'request-a',
+          number: 'RR-20261123-001',
+          warehouseId: 'warehouse-a',
+          status: 'open',
+          sourceReference: 'SO-20261123-001',
+          note: 'Phát sinh do đơn bán SO-20261123-001 không đủ tồn để giữ hàng.',
+          createdBy: 'owner-a',
+          createdAt: '2026-11-23T09:05:00Z',
+          purchaseOrderId: null,
+          purchaseOrderNumber: null,
+          lines: [{ id: 'request-line-a', skuId: 'sku-a', requestedQuantity: 8 }],
+        },
+      ],
+    }
+  })
+  renderOrdersPage()
+
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Xác nhận' }))
+  const confirmDialog = within(
+    await screen.findByRole('dialog', { name: 'Xác nhận & giữ hàng · SO-20261123-001' }),
+  )
+  await user.click(confirmDialog.getByRole('button', { name: 'Xác nhận & giữ hàng' }))
+  expect(await confirmDialog.findByText('Tồn khả dụng không đủ để giữ hàng.')).toBeInTheDocument()
+  await user.click(confirmDialog.getByRole('button', { name: 'Tạo yêu cầu nhập hàng' }))
+
+  const requestDialog = within(
+    await screen.findByRole('dialog', { name: 'Tạo yêu cầu nhập hàng' }),
+  )
+  expect(requestDialog.getByRole('combobox', { name: 'Kho cần bổ sung' })).toHaveValue(
+    'warehouse-a',
+  )
+  expect(requestDialog.getByRole('combobox', { name: 'Sản phẩm 1' })).toHaveValue('sku-a')
+  expect(requestDialog.getByRole('spinbutton', { name: 'Tổng số lượng cần có' })).toHaveValue(8)
+  await user.click(requestDialog.getByRole('button', { name: 'Tạo yêu cầu' }))
+  await waitFor(() =>
+    expect(inventoryService.command).toHaveBeenLastCalledWith('purchaseRequest.create', {
+      warehouseId: 'warehouse-a',
+      sourceReference: 'SO-20261123-001',
+      note: 'Phát sinh do đơn bán SO-20261123-001 không đủ tồn để giữ hàng.',
+      lines: [{ skuId: 'sku-a', requestedQuantity: 8 }],
+    }),
+  )
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+it('does not offer a restock request when the user lacks create permission', async () => {
+  const value = snapshot()
+  value.permissions.push('salesOrder.confirm')
+  value.salesOrders = [
+    {
+      id: 'sales-a',
+      number: 'SO-20261123-002',
+      warehouseId: 'warehouse-a',
+      customerReference: 'Khách A',
+      reference: '',
+      note: '',
+      status: 'draft',
+      fulfillmentDocumentId: null,
+      createdAt: '2026-11-23T09:00:00Z',
+      lines: [
+        {
+          id: 'sales-line-a',
+          skuId: 'sku-a',
+          sku: 'REAL-001',
+          name: 'Sản phẩm thật',
+          quantity: 6,
+          unitPrice: 250000,
+          locationId: 'default',
+          reservationId: null,
+          returnedQuantity: 0,
+          returnableQuantity: 6,
+        },
+      ],
+    },
+  ]
+  vi.mocked(inventoryService.load).mockResolvedValue(value)
+  vi.mocked(inventoryService.command).mockRejectedValue(
+    new InventoryApiError(409, 'INSUFFICIENT_STOCK', 'Tồn khả dụng không đủ để giữ hàng.'),
+  )
+  renderOrdersPage()
+
+  const user = userEvent.setup()
+  await user.click(await screen.findByRole('button', { name: 'Xác nhận' }))
+  const confirmDialog = within(
+    await screen.findByRole('dialog', { name: 'Xác nhận & giữ hàng · SO-20261123-002' }),
+  )
+  await user.click(confirmDialog.getByRole('button', { name: 'Xác nhận & giữ hàng' }))
+  expect(await confirmDialog.findByText('Tồn khả dụng không đủ để giữ hàng.')).toBeInTheDocument()
+  expect(
+    confirmDialog.queryByRole('button', { name: 'Tạo yêu cầu nhập hàng' }),
+  ).not.toBeInTheDocument()
 })
 
 it('records a customer return against the fulfilled order and its remaining returnable quantity', async () => {

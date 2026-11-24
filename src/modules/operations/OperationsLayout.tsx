@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   ArrowUpRight,
   BarChart3,
+  Calculator,
   ClipboardList,
   Headphones,
   HelpCircle,
@@ -28,7 +29,7 @@ import { MODULE_ROUTES, OPERATIONS_MODULES } from './registry'
 import { Modal } from '../../components/shared'
 import IntegrationSettingsPanel from '../settings/IntegrationSettingsPanel'
 import { useOperations } from './context'
-import { canAccessModule, getDefaultRoute, useAppAccess } from './access'
+import { canAccessModule, getDefaultRoute, isAdministrator, useAppAccess } from './access'
 
 const icons = {
   Admin: ShieldCheck,
@@ -41,6 +42,7 @@ const icons = {
   Products: Package,
   'Market Intelligence': TrendingUp,
   Reports: BarChart3,
+  Accounting: Calculator,
 }
 export default function OperationsLayout() {
   const { t, label, locale, setLocale } = useI18n()
@@ -56,8 +58,9 @@ export default function OperationsLayout() {
   const allowed = canAccessModule(currentName, access)
   const inventoryRoute = currentName === 'Inventory'
   const marketRoute = currentName === 'Market Intelligence'
+  const accountingRoute = currentName === 'Accounting'
   const adminWorkspace = ['Admin', 'Market Intelligence'].includes(currentName)
-  const plannedRoute = ['Products', 'Reports'].includes(current.name)
+  const plannedRoute = currentName === 'Products'
   useEffect(() => {
     document.title = `${label(currentName)} · SmartSales Suite`
   }, [currentName, label])
@@ -75,13 +78,14 @@ export default function OperationsLayout() {
   }
   if (!allowed) return <Navigate to={getDefaultRoute(access)} replace />
   return (
-    <div className="app-shell ops-shell">
+    <div className={`app-shell ops-shell ${isAdministrator(access) ? 'admin-navigation' : ''}`}>
       <MainSidebar
         activeModule={currentName}
         onModule={navigateModule}
         onHelp={() => setDialog('help')}
         mode={APP_MODE}
         adminMode={adminWorkspace}
+        topbarNavigation={!adminWorkspace}
       />
       <div className="main-area">
         <header className="ops-topbar">
@@ -103,8 +107,29 @@ export default function OperationsLayout() {
             <span className="ops-top-context">
               {adminWorkspace
                 ? t('Trung tâm quản trị', 'Administration center')
+                : accountingRoute
+                  ? t('Trung tâm kế toán', 'Accounting workspace')
                 : t('Trung tâm vận hành', 'Operations workspace')}
             </span>
+            {!adminWorkspace && (
+              <nav
+                className="ops-top-module-links"
+                aria-label={t('Điều hướng nhanh', 'Quick navigation')}
+              >
+                {canAccessModule('Reports', access) && (
+                  <NavLink to="/reports" end>
+                    <BarChart3 size={16} />
+                    {t('Báo cáo', 'Reports')}
+                  </NavLink>
+                )}
+                {canAccessModule('Admin', access) && (
+                  <NavLink to="/admin" end>
+                    <ShieldCheck size={16} />
+                    {t('Quản trị', 'Administration')}
+                  </NavLink>
+                )}
+              </nav>
+            )}
           </div>
           <div className="ops-top-actions">
             <span
@@ -113,7 +138,9 @@ export default function OperationsLayout() {
                 inventoryRoute
                   ? t('Kho · API độc lập', 'Inventory · independent API')
                   : marketRoute
-                    ? t('AI thị trường · Gemini + SerpAPI', 'Market AI · Gemini + SerpAPI')
+                    ? t('AI thị trường · Gemini Search', 'Market AI · Gemini Search')
+                    : accountingRoute
+                      ? t('Kế toán · sổ sách & duyệt mua', 'Accounting · books & purchase review')
                     : plannedRoute
                       ? t('Đang chờ triển khai', 'Awaiting implementation')
                       : APP_MODE === 'demo'
@@ -126,7 +153,9 @@ export default function OperationsLayout() {
                 {inventoryRoute
                   ? t('Kho · API độc lập', 'Inventory · independent API')
                   : marketRoute
-                    ? t('AI thị trường · Gemini + SerpAPI', 'Market AI · Gemini + SerpAPI')
+                    ? t('AI thị trường · Gemini Search', 'Market AI · Gemini Search')
+                    : accountingRoute
+                      ? t('Kế toán · sổ sách & duyệt mua', 'Accounting · books & purchase review')
                     : plannedRoute
                       ? t('Đang chờ triển khai', 'Awaiting implementation')
                       : APP_MODE === 'demo'
@@ -138,6 +167,8 @@ export default function OperationsLayout() {
                   ? 'API'
                   : marketRoute
                     ? 'AI'
+                    : accountingRoute
+                      ? t('KT', 'Acct')
                     : plannedRoute
                       ? t('Kế hoạch', 'Planned')
                       : APP_MODE === 'demo'
@@ -270,7 +301,7 @@ export default function OperationsLayout() {
           </nav>
         )}
         <div className="ops-content">
-          {inventoryRoute || plannedRoute || marketRoute ? (
+          {inventoryRoute || plannedRoute || marketRoute || accountingRoute ? (
             <>
               <Outlet />
               {dialog && (
@@ -280,7 +311,7 @@ export default function OperationsLayout() {
                       ? t('Cài đặt vận hành', 'Operations settings')
                       : dialog === 'help'
                         ? t('Các phân hệ SmartSales', 'SmartSales modules')
-                        : marketRoute
+                          : marketRoute
                           ? t('Phân tích thị trường bằng AI', 'AI market intelligence')
                           : plannedRoute
                             ? t('Lộ trình triển khai', 'Implementation roadmap')
@@ -296,19 +327,24 @@ export default function OperationsLayout() {
                       <>
                         <p>
                           {dialog === 'help'
-                            ? t(
-                                'Bắt đầu từ hồ sơ khách hàng, tạo đơn hàng, xác nhận và đóng gói, sau đó tạo vận đơn. Mọi yêu cầu chăm sóc đều có thể liên kết khách hàng, đơn hàng và hội thoại.',
-                                'Start with a customer profile, create an order, confirm and pack it, then create a shipment. Support requests can be linked to customers, orders and conversations.',
-                              )
+                            ? accountingRoute
+                              ? t(
+                                  'Đối chiếu nhà cung cấp, mặt hàng, số lượng và giá vốn trước khi duyệt. Quản lý kho chỉ nhận hàng sau khi đơn được duyệt; sổ kế toán chỉ ghi nhận bút toán đã ghi sổ.',
+                                  'Verify supplier, items, quantities and costs before approval. The warehouse manager can receive goods only after approval; the ledger includes posted entries only.',
+                                )
+                              : t(
+                                  'Bắt đầu từ hồ sơ khách hàng, tạo đơn hàng, xác nhận và đóng gói, sau đó tạo vận đơn. Mọi yêu cầu chăm sóc đều có thể liên kết khách hàng, đơn hàng và hội thoại.',
+                                  'Start with a customer profile, create an order, confirm and pack it, then create a shipment. Support requests can be linked to customers, orders and conversations.',
+                                )
                             : marketRoute
                               ? t(
-                                  'Phân tích thị trường cần API ở chế độ Live, phiên owner/admin và khóa SERPAPI_API_KEY cùng GEMINI_API_KEY được cấu hình trên máy chủ. Chỉ chủ đề và trích đoạn tìm kiếm công khai được gửi đến Gemini; mọi kết quả cần được kiểm tra theo nguồn.',
-                                  'Market intelligence requires the Live API, an owner/admin session, and SERPAPI_API_KEY plus GEMINI_API_KEY configured on the server. Only the topic and public search excerpts are sent to Gemini; verify findings against their sources.',
+                                  'Phân tích thị trường cần API ở chế độ Live, phiên owner/admin và GEMINI_API_KEY được cấu hình trên máy chủ. Gemini tự tìm thông tin công khai trên web và trả về bản phân tích ngắn.',
+                                  'Market intelligence requires the Live API, an owner/admin session, and GEMINI_API_KEY configured on the server. Gemini searches public web information and returns a concise analysis.',
                                 )
                               : plannedRoute
                                 ? t(
-                                    'Hoàn thiện và nghiệm thu kho trước, sau đó triển khai phân tích thị trường, sản phẩm, báo cáo và tích hợp toàn hệ thống theo thứ tự. Trạng thái và phần còn thiếu được ghi trên từng trang.',
-                                    'Complete and accept inventory first, then implement market intelligence, products, reporting and system integration in order. Each page shows its status and remaining work.',
+                                    'Hoàn thiện và nghiệm thu kho trước, sau đó triển khai phân tích thị trường, sản phẩm và tích hợp toàn hệ thống theo thứ tự. Báo cáo đã hoạt động và cập nhật theo dữ liệu vận hành.',
+                                    'Complete and accept inventory first, then implement market intelligence, products and system integration in order. Reports are available and use current operations data.',
                                   )
                                 : t(
                                     'Kho sử dụng API và phiên đăng nhập riêng. Tạo doanh nghiệp và quyền truy cập bằng công cụ quản trị server; mọi thay đổi tồn phải qua chứng từ. Xem docs/inventory-api.md để cấu hình.',

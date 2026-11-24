@@ -1,26 +1,5 @@
 import { notifyAuthenticationExpired } from '../../services/authSession'
 
-export interface MarketResearchSource {
-  id: string
-  title: string
-  publisher: string
-  url: string
-  publishedAt: string | null
-  excerpt: string
-}
-
-export interface MarketAnalysis {
-  summary: { text: string; sourceIds: string[] }
-  insights: {
-    title: string
-    detail: string
-    kind: 'evidence' | 'inference'
-    sourceIds: string[]
-  }[]
-  recommendations: { action: string; reason: string; sourceIds: string[] }[]
-  limitations: string[]
-}
-
 export interface MarketResearchRun {
   id: string
   industry: string
@@ -28,8 +7,7 @@ export interface MarketResearchRun {
   question: string
   status: 'running' | 'completed' | 'failed'
   model: string
-  sources: MarketResearchSource[]
-  analysis: MarketAnalysis | null
+  analysis: string | null
   errorCode: string | null
   createdAt: string
   finishedAt: string | null
@@ -37,10 +15,7 @@ export interface MarketResearchRun {
 
 export interface MarketProviderStatus {
   ready: boolean
-  providers: {
-    search: { name: string; configured: boolean }
-    analysis: { name: string; configured: boolean; model: string }
-  }
+  provider: { name: string; configured: boolean; model: string }
 }
 
 export class MarketIntelligenceApiError extends Error {
@@ -55,48 +30,6 @@ export class MarketIntelligenceApiError extends Error {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === 'string')
-const isHttpUrl = (value: unknown) => {
-  if (typeof value !== 'string') return false
-  try {
-    const url = new URL(value)
-    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
-  } catch {
-    return false
-  }
-}
-const isSource = (value: unknown): value is MarketResearchSource =>
-  isRecord(value) &&
-  typeof value.id === 'string' &&
-  typeof value.title === 'string' &&
-  typeof value.publisher === 'string' &&
-  isHttpUrl(value.url) &&
-  (value.publishedAt === null || typeof value.publishedAt === 'string') &&
-  typeof value.excerpt === 'string'
-const isAnalysis = (value: unknown): value is MarketAnalysis =>
-  isRecord(value) &&
-  isRecord(value.summary) &&
-  typeof value.summary.text === 'string' &&
-  isStringArray(value.summary.sourceIds) &&
-  Array.isArray(value.insights) &&
-  value.insights.every(
-    (insight) =>
-      isRecord(insight) &&
-      typeof insight.title === 'string' &&
-      typeof insight.detail === 'string' &&
-      ['evidence', 'inference'].includes(String(insight.kind)) &&
-      isStringArray(insight.sourceIds),
-  ) &&
-  Array.isArray(value.recommendations) &&
-  value.recommendations.every(
-    (item) =>
-      isRecord(item) &&
-      typeof item.action === 'string' &&
-      typeof item.reason === 'string' &&
-      isStringArray(item.sourceIds),
-  ) &&
-  isStringArray(value.limitations)
 const isRun = (value: unknown): value is MarketResearchRun =>
   isRecord(value) &&
   typeof value.id === 'string' &&
@@ -105,23 +38,17 @@ const isRun = (value: unknown): value is MarketResearchRun =>
   typeof value.question === 'string' &&
   ['running', 'completed', 'failed'].includes(String(value.status)) &&
   typeof value.model === 'string' &&
-  Array.isArray(value.sources) &&
-  value.sources.every(isSource) &&
-  (value.analysis === null || isAnalysis(value.analysis)) &&
+  (value.analysis === null || typeof value.analysis === 'string') &&
   (typeof value.errorCode === 'string' || value.errorCode === null) &&
   typeof value.createdAt === 'string' &&
   (typeof value.finishedAt === 'string' || value.finishedAt === null)
 const isProviderStatus = (value: unknown): value is MarketProviderStatus =>
   isRecord(value) &&
   typeof value.ready === 'boolean' &&
-  isRecord(value.providers) &&
-  isRecord(value.providers.search) &&
-  value.providers.search.name === 'SerpAPI' &&
-  typeof value.providers.search.configured === 'boolean' &&
-  isRecord(value.providers.analysis) &&
-  value.providers.analysis.name === 'Google Gemini' &&
-  typeof value.providers.analysis.configured === 'boolean' &&
-  typeof value.providers.analysis.model === 'string'
+  isRecord(value.provider) &&
+  value.provider.name === 'Google Gemini' &&
+  typeof value.provider.configured === 'boolean' &&
+  typeof value.provider.model === 'string'
 
 export function createMarketIntelligenceService({
   baseUrl = import.meta.env.VITE_INVENTORY_API_BASE_URL || '',

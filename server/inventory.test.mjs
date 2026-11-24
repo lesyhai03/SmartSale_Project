@@ -28,7 +28,17 @@ function fixture(t, path = ':memory:') {
       tenantId,
       new Date().toISOString(),
     )
-    for (const role of ['owner', 'receiver', 'issuer', 'counter', 'approver', 'viewer'])
+    for (const role of [
+      'owner',
+      'manager',
+      'accountant',
+      'staff',
+      'receiver',
+      'issuer',
+      'counter',
+      'approver',
+      'viewer',
+    ])
       db.prepare('INSERT INTO users(id,tenant_id,name,role) VALUES (?,?,?,?)').run(
         `${tenantId}-${role}`,
         tenantId,
@@ -187,7 +197,7 @@ test('tenant isolation and server-side roles apply to every command and snapshot
   )
 })
 
-test('receivers can register products and post receipts but cannot issue or adjust stock', (t) => {
+test('warehouse receivers cannot receive stock before an approved purchase order', (t) => {
   const f = fixture(t)
   const operator = {
     tenantId: 'tenant-a',
@@ -196,7 +206,9 @@ test('receivers can register products and post receipts but cannot issue or adju
   }
   const permissions = f.inventory.snapshot(operator).permissions
   assert.ok(permissions.includes('sku.create'))
-  assert.ok(permissions.includes('document.post'))
+  assert.ok(!permissions.includes('document.create'))
+  assert.ok(!permissions.includes('document.approve'))
+  assert.ok(!permissions.includes('document.post'))
   assert.ok(!permissions.includes('document.cancel'))
 
   const skuId = f.command(
@@ -205,20 +217,26 @@ test('receivers can register products and post receipts but cannot issue or adju
     randomUUID(),
     operator,
   ).result.id
-  const receiptId = f.command(
-    'document.create',
-    {
-      type: 'receipt',
-      warehouseId: f.warehouse,
-      lines: [{ skuId, quantity: 3, unitCost: 200 }],
-    },
-    randomUUID(),
-    operator,
-  ).result.id
-  f.command('document.approve', { id: receiptId }, randomUUID(), operator)
-  assert.equal(
-    f.command('document.post', { id: receiptId }, randomUUID(), operator).balances[0].onHand,
-    3,
+  const manager = { tenantId: 'tenant-a', userId: 'tenant-a-manager', role: 'manager' }
+  assert.throws(
+    () =>
+      f.command(
+        'document.create',
+        {
+          type: 'receipt',
+          warehouseId: f.warehouse,
+          lines: [{ skuId, quantity: 3, unitCost: 200 }],
+        },
+        randomUUID(),
+        manager,
+      ),
+    errorCode('PURCHASE_ORDER_REQUIRED'),
+  )
+  const unlinkedReceipt = f.document('receipt', [{ skuId, quantity: 3, unitCost: 200 }])
+  const approver = { tenantId: 'tenant-a', userId: 'tenant-a-approver', role: 'approver' }
+  assert.throws(
+    () => f.command('document.approve', { id: unlinkedReceipt }, randomUUID(), approver),
+    errorCode('PURCHASE_ORDER_REQUIRED'),
   )
   assert.throws(
     () =>
@@ -1062,6 +1080,138 @@ test('purchase order tenant, supplier, and role boundaries are revalidated serve
         receiver,
       ),
     errorCode('FORBIDDEN'),
+  )
+})
+
+test('restock requests flow from staff through manager proposal and accountant approval to manager receipt', (t) => {
+  const f = fixture(t)
+  const staff = { tenantId: 'tenant-a', userId: 'tenant-a-staff', role: 'staff' }
+  const manager = { tenantId: 'tenant-a', userId: 'tenant-a-manager', role: 'manager' }
+  const accountant = {
+    tenantId: 'tenant-a',
+    userId: 'tenant-a-accountant',
+    role: 'accountant',
+  }
+  const supplier = f.command('supplier.create', {
+    code: 'RESTOCK-VENDOR',
+    name: 'Nhà cung cấp bổ sung',
+  }).result.id
+  const request = f.command(
+    'purchaseRequest.create',
+    {
+      warehouseId: f.warehouse,
+      sourceReference: 'conversation:conv-1',
+      lines: [{ skuId: f.sku, requestedQuantity: 4 }],
+    },
+    randomUUID(),
+    staff,
+  )
+  const requestId = request.result.id
+  assert.equal(request.purchaseRequests.find((item) => item.id === requestId).status, 'open')
+  assert.equal(
+    f.inventory.snapshot(staff).purchaseRequests.some((item) => item.id === requestId),
+    true,
+  )
+  assert.equal(f.inventory.snapshot(staff).purchaseOrders.length, 0)
+  assert.equal(
+    f.inventory.snapshot(manager).purchaseRequests.some((item) => item.id === requestId),
+    true,
+  )
+  assert.equal(f.inventory.snapshot(accountant).purchaseRequests.length, 0)
+  assert.throws(
+    () =>
+      f.command(
+        'purchaseOrder.create',
+        {
+          warehouseId: f.warehouse,
+          supplierId: supplier,
+          lines: [{ skuId: f.sku, quantity: 4, unitCost: 100 }],
+        },
+        randomUUID(),
+        staff,
+      ),
+    errorCode('FORBIDDEN'),
+  )
+  assert.throws(
+    () =>
+      f.command(
+        'purchaseOrder.create',
+        {
+          warehouseId: f.warehouse,
+          supplierId: supplier,
+          restockRequestId: requestId,
+          lines: [{ skuId: f.sku, quantity: 3, unitCost: 100 }],
+        },
+        randomUUID(),
+        manager,
+      ),
+    errorCode('REQUEST_LINES_INCOMPLETE'),
+  )
+  const proposal = f.command(
+    'purchaseOrder.create',
+    {
+      warehouseId: f.warehouse,
+      supplierId: supplier,
+      restockRequestId: requestId,
+      lines: [{ skuId: f.sku, quantity: 4, unitCost: 100 }],
+    },
+    randomUUID(),
+    manager,
+  )
+  const orderId = proposal.result.id
+  assert.equal(
+    proposal.purchaseRequests.find((item) => item.id === requestId).status,
+    'proposed',
+  )
+  assert.equal(
+    f.inventory.snapshot(staff).purchaseRequests.find((item) => item.id === requestId).status,
+    'proposed',
+  )
+  assert.throws(
+    () => f.command('purchaseOrder.approve', { id: orderId }, randomUUID(), manager),
+    errorCode('FORBIDDEN'),
+  )
+  const approved = f.command(
+    'purchaseOrder.approve',
+    { id: orderId },
+    randomUUID(),
+    accountant,
+  )
+  assert.equal(approved.purchaseOrders.find((item) => item.id === orderId).status, 'approved')
+  assert.equal(approved.purchaseRequests.length, 0)
+  assert.equal(
+    f.inventory.snapshot(manager).purchaseRequests.find((item) => item.id === requestId).status,
+    'approved',
+  )
+  const approvedLine = approved.purchaseOrders.find((item) => item.id === orderId).lines[0]
+  const receipt = f.command(
+    'purchaseOrder.receive',
+    {
+      id: orderId,
+      lines: [{ purchaseOrderLineId: approvedLine.id, quantity: 4 }],
+    },
+    randomUUID(),
+    manager,
+  )
+  assert.equal(receipt.documents.find((item) => item.id === receipt.result.id).status, 'draft')
+  assert.equal(receipt.metrics.onHand, 0)
+  const receiptApprover = { tenantId: 'tenant-a', userId: 'tenant-a-approver', role: 'approver' }
+  assert.throws(
+    () =>
+      f.command(
+        'document.approve',
+        { id: receipt.result.id },
+        randomUUID(),
+        receiptApprover,
+      ),
+    errorCode('FORBIDDEN'),
+  )
+  f.command('document.approve', { id: receipt.result.id }, randomUUID(), manager)
+  const posted = f.command('document.post', { id: receipt.result.id }, randomUUID(), manager)
+  assert.equal(posted.metrics.onHand, 4)
+  assert.equal(
+    posted.purchaseRequests.find((item) => item.id === requestId).status,
+    'received',
   )
 })
 

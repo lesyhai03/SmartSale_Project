@@ -9,6 +9,7 @@ const snapshot = (serialTracked = false): InventorySnapshot => ({
   warehouses: [],
   locations: [],
   suppliers: [],
+  purchaseRequests: [],
   purchaseOrders: [],
   salesOrders: [],
   balances: [],

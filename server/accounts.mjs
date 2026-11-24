@@ -5,7 +5,17 @@ import { ALL_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, permissionsForUser } from '.
 
 const deriveKey = promisify(scrypt)
 const parameters = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
-const roles = ['admin', 'manager', 'staff', 'receiver', 'issuer', 'counter', 'approver', 'viewer']
+const roles = [
+  'admin',
+  'manager',
+  'accountant',
+  'staff',
+  'receiver',
+  'issuer',
+  'counter',
+  'approver',
+  'viewer',
+]
 const fail = (status, code, message) => {
   throw new DomainError(status, code, message)
 }
@@ -217,21 +227,67 @@ export function createAccounts(db, { now = () => new Date() } = {}) {
     },
     listUsers(actor) {
       const current = requireManager(actor)
+      const currentTime = now()
+      const onlineSince = new Date(currentTime.getTime() - 5 * 60 * 1000).toISOString()
       return {
         users: db
           .prepare(
-            `SELECT u.id,u.name,u.role,u.active,c.email
+            `SELECT u.id,u.name,u.role,u.active,c.email,u.last_activity_at AS lastActivityAt,
+              CASE WHEN u.active=1 AND u.last_activity_at>=?
+                AND EXISTS (
+                  SELECT 1 FROM access_tokens s
+                  WHERE s.user_id=u.id AND s.tenant_id=u.tenant_id AND s.expires_at>?
+                )
+                THEN 1 ELSE 0 END AS isOnline
         FROM users u LEFT JOIN account_credentials c ON c.user_id=u.id AND c.tenant_id=u.tenant_id
         WHERE u.tenant_id=? ORDER BY u.name,u.id`,
           )
-          .all(current.tenant.id)
+          .all(onlineSince, currentTime.toISOString(), current.tenant.id)
           .map((row) => ({
             ...row,
             active: Boolean(row.active),
+            isOnline: Boolean(row.isOnline),
+            lastActivityAt: row.lastActivityAt ?? null,
             email: row.email ?? null,
             permissions: permissionsForUser(db, current.tenant.id, row.id, row.role),
           })),
       }
+    },
+    userActivity(actor, userId) {
+      const current = requireManager(actor)
+      const target = db
+        .prepare('SELECT id FROM users WHERE id=? AND tenant_id=?')
+        .get(userId, current.tenant.id)
+      if (!target) fail(404, 'NOT_FOUND', 'Không tìm thấy nhân viên trong doanh nghiệp.')
+      const events = db
+        .prepare(
+          `SELECT id,kind,action,entity_id AS entityId,details_json AS detailsJson,succeeded,created_at AS createdAt
+          FROM (
+            SELECT id,'login' AS kind,
+              CASE WHEN succeeded=1 THEN 'login.success' ELSE 'login.failure' END AS action,
+              NULL AS entity_id,NULL AS details_json,succeeded,created_at
+            FROM login_events WHERE tenant_id=? AND user_id=?
+            UNION ALL
+            SELECT id,'action' AS kind,action,entity_id,details_json,NULL AS succeeded,created_at
+            FROM audit_events WHERE tenant_id=? AND actor_id=?
+          )
+          ORDER BY createdAt DESC,id DESC LIMIT 100`,
+        )
+        .all(current.tenant.id, userId, current.tenant.id, userId)
+        .map((row) => {
+          const details = row.detailsJson ? JSON.parse(row.detailsJson) : null
+          return {
+            id: row.id,
+            kind: row.kind,
+            action: row.action,
+            entityId: row.entityId,
+            description:
+              details && typeof details.description === 'string' ? details.description : null,
+            succeeded: row.succeeded === null ? null : Boolean(row.succeeded),
+            createdAt: row.createdAt,
+          }
+        })
+      return { events }
     },
     updateUserPermissions(actor, userId, input) {
       fields(input, ['overrides'])

@@ -9,8 +9,8 @@
 - **Vận hành bán hàng:** tổng quan, khách hàng, hộp thư, chăm sóc, đơn hàng và vận chuyển.
 - **Quản trị:** báo cáo, tài khoản nhân viên và phân quyền.
 - **Kho & báo giá:** quản lý SKU, nhập/xuất/chuyển/kiểm kê và xuất báo giá PDF.
-- **Phân tích thị trường:** tạo báo cáo có nguồn tham khảo với Google Gemini và SerpAPI.
-- **Tích hợp:** cấu hình Gemini, SerpAPI, Telegram, Shopee, Lazada và TikTok Shop trong phần Cài đặt.
+- **Phân tích thị trường:** Gemini tự tìm kiếm web và trả về bản phân tích tóm tắt.
+- **Tích hợp:** cấu hình Gemini, Telegram, Shopee, Lazada và TikTok Shop trong phần Cài đặt.
 
 Xem [lộ trình và các giới hạn hiện tại](docs/IMPLEMENTATION_ROADMAP.md) trước khi dùng dữ liệu thật.
 
@@ -69,13 +69,13 @@ Tạo tài khoản tại `/register` rồi đăng nhập bằng owner/admin. API
 
 ### Cấu hình AI và kết nối
 
-Trong **Cài đặt**, nhập và kiểm tra API key Gemini/SerpAPI hoặc bot token Telegram. Để lưu credentials mã hóa phía máy chủ, tạo `INTEGRATION_ENCRYPTION_KEY` một lần:
+Trong **Cài đặt**, nhập và kiểm tra API key Gemini hoặc bot token Telegram. Để lưu credentials mã hóa phía máy chủ, tạo `INTEGRATION_ENCRYPTION_KEY` một lần:
 
 ```powershell
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 ```
 
-Giữ khóa này bí mật và ổn định; nếu thay đổi, máy chủ không thể giải mã credentials đã lưu. Có thể cấu hình Gemini, SerpAPI và Telegram bằng biến môi trường phía máy chủ tương ứng.
+Giữ khóa này bí mật và ổn định; nếu thay đổi, máy chủ không thể giải mã credentials đã lưu. Có thể cấu hình Gemini và Telegram bằng biến môi trường phía máy chủ tương ứng.
 
 Shopee, Lazada và TikTok Shop hiện hỗ trợ nhập credentials, kiểm tra API seller chỉ đọc, lưu và ngắt kết nối. Luồng OAuth/callback, tự làm mới token và đồng bộ đơn hàng/sản phẩm chưa được triển khai.
 

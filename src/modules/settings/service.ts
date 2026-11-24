@@ -2,7 +2,6 @@ import { notifyAuthenticationExpired } from '../../services/authSession'
 
 export type IntegrationProvider =
   | 'gemini'
-  | 'serpapi'
   | 'telegram'
   | 'shopee'
   | 'lazada'
@@ -73,9 +72,9 @@ const isStatus = (value: unknown): value is IntegrationSettingsStatus => {
   const providers = value.providers
   return (
     isRecord(providers) &&
-    (
-      ['gemini', 'serpapi', 'telegram', 'shopee', 'lazada', 'tiktokshop'] as const
-    ).every((provider) => isProviderStatus(providers[provider]))
+    (['gemini', 'telegram', 'shopee', 'lazada', 'tiktokshop'] as const).every((provider) =>
+      isProviderStatus(providers[provider]),
+    )
   )
 }
 

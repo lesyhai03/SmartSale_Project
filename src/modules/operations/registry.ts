@@ -9,6 +9,7 @@ export const OPERATIONS_MODULES = [
   { name: 'Products', path: '/products' },
   { name: 'Market Intelligence', path: '/market-intelligence' },
   { name: 'Reports', path: '/reports' },
+  { name: 'Accounting', path: '/accounting' },
 ] as const
 export const MODULE_ROUTES: Record<string, string> = {
   Admin: '/admin',
@@ -22,4 +23,5 @@ export const MODULE_ROUTES: Record<string, string> = {
   Products: '/products',
   'Market Intelligence': '/market-intelligence',
   Reports: '/reports',
+  Accounting: '/accounting',
 }

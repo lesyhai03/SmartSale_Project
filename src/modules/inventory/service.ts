@@ -17,6 +17,8 @@ export interface InventoryAccountUser {
   email: string | null
   role: string
   active: boolean
+  isOnline: boolean
+  lastActivityAt: string | null
   permissions?: string[]
 }
 
@@ -31,6 +33,16 @@ export interface InventoryLoginEvent {
   createdAt: string
 }
 
+export interface InventoryAccountActivity {
+  id: string
+  kind: 'login' | 'action'
+  action: string
+  entityId: string | null
+  description: string | null
+  succeeded: boolean | null
+  createdAt: string
+}
+
 export interface InventoryAccountSession {
   actor: { userId: string; tenantId: string; role: string }
   user: { id: string; name: string; email: string | null; role: string }
@@ -40,6 +52,32 @@ export interface InventoryAccountSession {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
+const isRestockRequest = (value: unknown) =>
+  isRecord(value) &&
+  [
+    'id',
+    'number',
+    'warehouseId',
+    'sourceReference',
+    'note',
+    'createdBy',
+    'createdAt',
+  ].every((field) => typeof value[field] === 'string') &&
+  ['open', 'proposed', 'approved', 'partial', 'received', 'cancelled'].includes(
+    String(value.status),
+  ) &&
+  (value.purchaseOrderId === null || typeof value.purchaseOrderId === 'string') &&
+  (value.purchaseOrderNumber === null || typeof value.purchaseOrderNumber === 'string') &&
+  Array.isArray(value.lines) &&
+  value.lines.length > 0 &&
+  value.lines.every(
+    (line: unknown) =>
+      isRecord(line) &&
+      typeof line.id === 'string' &&
+      typeof line.skuId === 'string' &&
+      Number.isSafeInteger(line.requestedQuantity) &&
+      Number(line.requestedQuantity) > 0,
+  )
 const isAccountUser = (value: unknown): value is InventoryAccountUser =>
   isRecord(value) &&
   typeof value.id === 'string' &&
@@ -47,6 +85,8 @@ const isAccountUser = (value: unknown): value is InventoryAccountUser =>
   (typeof value.email === 'string' || value.email === null) &&
   typeof value.role === 'string' &&
   typeof value.active === 'boolean' &&
+  typeof value.isOnline === 'boolean' &&
+  (typeof value.lastActivityAt === 'string' || value.lastActivityAt === null) &&
   (value.permissions === undefined ||
     (Array.isArray(value.permissions) &&
       value.permissions.every((item) => typeof item === 'string')))
@@ -59,6 +99,15 @@ const isLoginEvent = (value: unknown): value is InventoryLoginEvent =>
   typeof value.succeeded === 'boolean' &&
   typeof value.remoteAddress === 'string' &&
   typeof value.userAgent === 'string' &&
+  typeof value.createdAt === 'string'
+const isAccountActivity = (value: unknown): value is InventoryAccountActivity =>
+  isRecord(value) &&
+  typeof value.id === 'string' &&
+  (value.kind === 'login' || value.kind === 'action') &&
+  typeof value.action === 'string' &&
+  (typeof value.entityId === 'string' || value.entityId === null) &&
+  (typeof value.description === 'string' || value.description === null) &&
+  (typeof value.succeeded === 'boolean' || value.succeeded === null) &&
   typeof value.createdAt === 'string'
 const isAccountSession = (value: unknown): value is InventoryAccountSession =>
   isRecord(value) &&
@@ -85,6 +134,7 @@ export function assertInventorySnapshot(value: unknown): asserts value is Invent
     'skus',
     'balances',
     'documents',
+    'purchaseRequests',
     'purchaseOrders',
     'salesOrders',
     'ledger',
@@ -114,6 +164,12 @@ export function assertInventorySnapshot(value: unknown): asserts value is Invent
       'Dữ liệu API kho không đúng cấu trúc. / Invalid inventory API response.',
     )
   }
+  if (!Array.isArray(value.purchaseRequests) || !value.purchaseRequests.every(isRestockRequest))
+    throw new InventoryApiError(
+      502,
+      'INVALID_RESPONSE',
+      'Dữ liệu yêu cầu nhập hàng không hợp lệ. / Invalid restock request data.',
+    )
   if (
     !Array.isArray(value.purchaseOrders) ||
     !value.purchaseOrders.every(
@@ -454,6 +510,20 @@ export function createInventoryService(baseUrl = '') {
           502,
           'INVALID_LOGIN_EVENTS',
           'Lịch sử đăng nhập không hợp lệ. / Invalid login history.',
+        )
+      return value.events
+    },
+    async listUserActivity(id: string): Promise<InventoryAccountActivity[]> {
+      const value: unknown = await request(`/auth/users/${encodeURIComponent(id)}/activity`)
+      if (
+        !isRecord(value) ||
+        !Array.isArray(value.events) ||
+        !value.events.every(isAccountActivity)
+      )
+        throw new InventoryApiError(
+          502,
+          'INVALID_ACCOUNT_ACTIVITY',
+          'Lịch sử hoạt động nhân viên không hợp lệ. / Invalid employee activity history.',
         )
       return value.events
     },

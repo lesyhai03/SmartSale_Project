@@ -9,35 +9,11 @@ const topic = {
   market: 'Việt Nam',
   question: 'Phân tích xu hướng và đối thủ',
 }
-const searchResults = {
-  organic_results: [
-    {
-      title: 'Xu hướng nhà thông minh tại Việt Nam',
-      source: 'Example Research',
-      link: 'https://example.com/smart-home',
-      date: '2026-10-10',
-      snippet: 'Người dùng quan tâm tới thiết bị tiết kiệm năng lượng.',
-    },
+const summary = '- Nhu cầu thiết bị tiết kiệm năng lượng đang được quan tâm.\n- Cần kiểm chứng quy mô trước khi mở rộng danh mục.'
+const groundingMetadata = {
+  groundingChunks: [
+    { web: { title: 'Xu hướng nhà thông minh', uri: 'https://example.com/smart-home' } },
   ],
-}
-const analysis = {
-  summary: { text: 'Nhu cầu tiết kiệm năng lượng được đề cập.', sourceIds: ['S1'] },
-  insights: [
-    {
-      title: 'Tiết kiệm năng lượng',
-      detail: 'Nguồn ghi nhận người dùng quan tâm tới thiết bị tiết kiệm năng lượng.',
-      kind: 'evidence',
-      sourceIds: ['S1'],
-    },
-  ],
-  recommendations: [
-    {
-      action: 'Kiểm chứng mức quan tâm trước khi mở rộng danh mục.',
-      reason: 'Nguồn tìm kiếm chưa đủ để ước tính quy mô thị trường.',
-      sourceIds: ['S1'],
-    },
-  ],
-  limitations: ['Chưa có dữ liệu quy mô hoặc doanh số toàn thị trường.'],
 }
 
 describe('market intelligence service', () => {
@@ -69,16 +45,18 @@ describe('market intelligence service', () => {
       'Owner B',
       'owner',
     )
-    fetchImpl = vi.fn(async (url) =>
-      String(url).includes('serpapi')
-        ? Response.json(searchResults)
-        : Response.json({
-            candidates: [{ content: { parts: [{ text: JSON.stringify(analysis) }] } }],
-          }),
+    fetchImpl = vi.fn(async () =>
+      Response.json({
+        candidates: [
+          {
+            content: { parts: [{ text: summary }] },
+            groundingMetadata,
+          },
+        ],
+      }),
     )
     service = createMarketIntelligence(db, {
       fetchImpl,
-      serpApiKey: 'server-only-search-key',
       geminiApiKey: 'server-only-ai-key',
       now: () => new Date(createdAt),
     })
@@ -89,7 +67,7 @@ describe('market intelligence service', () => {
     vi.restoreAllMocks()
   })
 
-  it('runs grounded research, persists evidence, and scopes history to the tenant', async () => {
+  it('uses Gemini web grounding and returns only a concise analysis, scoped to the tenant', async () => {
     const result = await service.research(admin, topic, 'market-run-key-001')
 
     expect(result.reused).toBe(false)
@@ -98,25 +76,32 @@ describe('market intelligence service', () => {
       market: topic.market,
       question: topic.question,
       status: 'completed',
-      sources: [{ id: 'S1', url: 'https://example.com/smart-home' }],
-      analysis,
+      analysis: summary,
     })
+    expect(result.run).not.toHaveProperty('sources')
     expect(service.listRuns({ ...admin, tenantId: 'tenant-b', userId: 'owner-b' }).runs).toEqual([])
     expect(service.listRuns(admin).runs).toHaveLength(1)
     expect(service.status(admin)).toEqual({
       ready: true,
-      providers: {
-        search: { name: 'SerpAPI', configured: true },
-        analysis: { name: 'Google Gemini', configured: true, model: 'gemini-2.5-flash' },
-      },
+      provider: { name: 'Google Gemini', configured: true, model: 'gemini-3.8-flash' },
     })
-    expect(new URL(fetchImpl.mock.calls[0][0]).searchParams.get('api_key')).toBe(
-      'server-only-search-key',
-    )
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(String(fetchImpl.mock.calls[0][0])).toContain('generativelanguage.googleapis.com')
+    expect(fetchImpl.mock.calls[0][1].headers['x-goog-api-key']).toBe('server-only-ai-key')
+    const requestBody = JSON.parse(fetchImpl.mock.calls[0][1].body)
+    expect(requestBody.tools).toEqual([{ google_search: {} }])
+    expect(requestBody.generationConfig.maxOutputTokens).toBeLessThanOrEqual(700)
+    expect(requestBody.contents[0].parts[0].text).toContain('Không tạo danh sách bài viết')
+    const [saved] = service.listRuns(admin).runs
+    expect(JSON.parse(db.prepare('SELECT sources_json FROM market_research_runs').get().sources_json))
+      .toMatchObject([{ url: 'https://example.com/smart-home' }])
     expect(
       JSON.stringify({ result, status: service.status(admin), runs: service.listRuns(admin) }),
-    ).not.toContain('server-only-search-key')
-    expect(fetchImpl.mock.calls[1][1].headers['x-goog-api-key']).toBe('server-only-ai-key')
+    ).not.toContain('server-only-ai-key')
+    expect(JSON.stringify({ result, runs: service.listRuns(admin) })).not.toContain(
+      'example.com/smart-home',
+    )
+    expect(saved.analysis).toBe(summary)
   })
 
   it('reuses an idempotent result and rejects a different payload for the same key', async () => {
@@ -124,7 +109,7 @@ describe('market intelligence service', () => {
     const repeated = await service.research(admin, topic, 'market-run-key-002')
 
     expect(repeated).toMatchObject({ reused: true, run: { id: first.run.id } })
-    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
     await expect(
       service.research(
         admin,
@@ -138,7 +123,6 @@ describe('market intelligence service', () => {
     expect(() => service.status({ ...admin, role: 'staff' })).toThrow(DomainError)
     const unconfigured = createMarketIntelligence(db, {
       fetchImpl,
-      serpApiKey: '',
       geminiApiKey: '',
     })
     expect(unconfigured.status(admin).ready).toBe(false)
@@ -148,33 +132,24 @@ describe('market intelligence service', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('does not publish an analysis that cites a source outside the evidence set', async () => {
-    fetchImpl.mockImplementation(async (url) =>
-      String(url).includes('serpapi')
-        ? Response.json(searchResults)
-        : Response.json({
-            candidates: [
-              {
-                content: {
-                  parts: [
-                    {
-                      text: JSON.stringify({
-                        ...analysis,
-                        summary: { text: 'Không có nguồn hợp lệ.', sourceIds: ['S99'] },
-                      }),
-                    },
-                  ],
-                },
-              },
-            ],
-          }),
+  it('rejects a response without grounding sources or a concise analysis', async () => {
+    fetchImpl.mockResolvedValueOnce(
+      Response.json({
+        candidates: [{ content: { parts: [{ text: summary }] }, groundingMetadata: {} }],
+      }),
     )
-
     await expect(service.research(admin, topic, 'market-run-key-004')).rejects.toMatchObject({
+      code: 'MARKET_NO_SOURCES',
+    })
+
+    fetchImpl.mockResolvedValueOnce(
+      Response.json({
+        candidates: [{ content: { parts: [{ text: '' }] }, groundingMetadata }],
+      }),
+    )
+    await expect(service.research(admin, topic, 'market-run-key-005')).rejects.toMatchObject({
       code: 'MARKET_ANALYSIS_INVALID',
     })
-    const [saved] = service.listRuns(admin).runs
-    expect(saved).toMatchObject({ status: 'failed', errorCode: 'MARKET_ANALYSIS_INVALID' })
-    expect(saved.analysis).toBeNull()
+    expect(service.listRuns(admin).runs.map((run) => run.status)).toEqual(['failed', 'failed'])
   })
 })

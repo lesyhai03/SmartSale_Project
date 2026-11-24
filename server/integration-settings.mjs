@@ -5,7 +5,7 @@ const fail = (status, code, message) => {
   throw new DomainError(status, code, message)
 }
 
-const providerNames = ['gemini', 'serpapi', 'telegram', 'shopee', 'lazada', 'tiktokshop']
+const providerNames = ['gemini', 'telegram', 'shopee', 'lazada', 'tiktokshop']
 const providers = new Set(providerNames)
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 const hasControls = (value) =>
@@ -65,9 +65,8 @@ export function createIntegrationSettings(
     defaults = {
       gemini: {
         apiKey: process.env.GEMINI_API_KEY || '',
-        model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
       },
-      serpapi: { apiKey: process.env.SERPAPI_API_KEY || '' },
       telegram: { botToken: process.env.TELEGRAM_BOT_TOKEN || '' },
       shopee: {},
       lazada: {},
@@ -131,17 +130,12 @@ export function createIntegrationSettings(
         fail(400, 'INVALID_FIELDS', 'Chỉ chấp nhận apiKey và model.')
       const model =
         input.model === undefined
-          ? defaults.gemini?.model || 'gemini-2.5-flash'
+          ? defaults.gemini?.model || 'gemini-3.8-flash'
           : typeof input.model === 'string' && /^[A-Za-z0-9._-]{1,100}$/.test(input.model.trim())
             ? input.model.trim()
             : null
       if (!model) fail(422, 'INVALID_CREDENTIAL', 'Tên mô hình Gemini không hợp lệ.')
       return { apiKey: cleanSecret(input.apiKey, 'Gemini API key'), model }
-    }
-    if (provider === 'serpapi') {
-      if (Object.keys(input).some((field) => field !== 'apiKey'))
-        fail(400, 'INVALID_FIELDS', 'Chỉ chấp nhận apiKey.')
-      return { apiKey: cleanSecret(input.apiKey, 'SerpAPI key') }
     }
     if (provider === 'shopee') {
       const fields = ['partnerId', 'partnerKey', 'shopId', 'accessToken', 'refreshToken']
@@ -198,13 +192,6 @@ export function createIntegrationSettings(
       if (provider === 'gemini') {
         response = await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models', {
           headers: { Accept: 'application/json', 'x-goog-api-key': credentials.apiKey },
-          ...timeout,
-        })
-      } else if (provider === 'serpapi') {
-        const url = new URL('https://serpapi.com/account.json')
-        url.searchParams.set('api_key', credentials.apiKey)
-        response = await fetchImpl(url, {
-          headers: { Accept: 'application/json' },
           ...timeout,
         })
       } else if (provider === 'telegram') {
@@ -308,11 +295,6 @@ export function createIntegrationSettings(
         fail(422, 'INTEGRATION_CREDENTIAL_REJECTED', 'Token không phải bot Telegram hợp lệ.')
       return { accountName: `@${safeAccountName(result.result.username, 'Telegram bot')}` }
     }
-    if (provider === 'serpapi') {
-      if (!isRecord(result) || result.error)
-        fail(422, 'INTEGRATION_CREDENTIAL_REJECTED', 'SerpAPI không chấp nhận khóa này.')
-      return { accountName: 'SerpAPI' }
-    }
     if (provider === 'shopee') {
       if (!isRecord(result?.response) || result.error)
         fail(
@@ -382,7 +364,7 @@ export function createIntegrationSettings(
     const geminiModel =
       saved.gemini && key
         ? credentialsFor(actor, 'gemini').model
-        : defaults.gemini?.model || 'gemini-2.5-flash'
+        : defaults.gemini?.model || 'gemini-3.8-flash'
     const providerStatus = (provider, defaultConfigured = false) => ({
       configured: Boolean(saved[provider] || defaultConfigured),
       source: saved[provider] ? 'workspace' : 'server',
@@ -396,7 +378,6 @@ export function createIntegrationSettings(
           ...providerStatus('gemini', Boolean(defaults.gemini?.apiKey)),
           model: geminiModel,
         },
-        serpapi: providerStatus('serpapi', Boolean(defaults.serpapi?.apiKey)),
         telegram: providerStatus('telegram', Boolean(defaults.telegram?.botToken)),
         shopee: providerStatus('shopee'),
         lazada: providerStatus('lazada'),
@@ -424,7 +405,16 @@ export function createIntegrationSettings(
           'INTEGRATION_STORAGE_NOT_CONFIGURED',
           'Cấu hình INTEGRATION_ENCRYPTION_KEY trên máy chủ trước khi lưu API key.',
         )
-      const credentials = normalizeInput(name, input)
+      const savedGemini =
+        name === 'gemini' &&
+        isRecord(input) &&
+        input.apiKey === '' &&
+        typeof input.model === 'string'
+          ? readStored(actor, 'gemini')
+          : null
+      const credentials = savedGemini
+        ? normalizeInput('gemini', { apiKey: savedGemini.apiKey, model: input.model })
+        : normalizeInput(name, input)
       const connection = await checkProvider(name, credentials)
       const encrypted = encrypt(actor.tenantId, name, credentials)
       const timestamp = now().toISOString()

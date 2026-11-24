@@ -3,7 +3,11 @@ import type { FormEvent } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Modal } from '../../components/shared'
 import { useI18n } from '../../i18n'
-import type { InventorySnapshot, PurchaseOrder } from './types'
+import type {
+  InventorySnapshot,
+  PurchaseOrder,
+  StockRestockRequest,
+} from './types'
 import type { RunCommand } from './InventoryForms'
 
 interface PurchaseOrderLineInput {
@@ -14,27 +18,284 @@ interface PurchaseOrderLineInput {
   unitCost: string
 }
 
+interface RestockRequestLineInput {
+  key: number
+  skuId: string
+  requestedQuantity: string
+}
+
+export interface RestockRequestPrefill {
+  warehouseId: string
+  sourceReference: string
+  note: string
+  lines: Array<{ skuId: string; requestedQuantity: number }>
+}
+
+export function RestockRequestCreateForm({
+  data,
+  run,
+  onClose,
+  initialRequest,
+  onCreated,
+}: {
+  data: InventorySnapshot
+  run: RunCommand
+  onClose: () => void
+  initialRequest?: RestockRequestPrefill
+  onCreated?: () => void
+}) {
+  const { t } = useI18n()
+  const [warehouseId, setWarehouseId] = useState(
+    initialRequest?.warehouseId ?? data.warehouses.find((warehouse) => warehouse.active)?.id ?? '',
+  )
+  const [sourceReference, setSourceReference] = useState(initialRequest?.sourceReference ?? '')
+  const [note, setNote] = useState(initialRequest?.note ?? '')
+  const [lines, setLines] = useState<RestockRequestLineInput[]>(() =>
+    initialRequest
+      ? initialRequest.lines.map((line, index) => ({
+          key: index + 1,
+          skuId: line.skuId,
+          requestedQuantity: String(line.requestedQuantity),
+        }))
+      : [{ key: 1, skuId: '', requestedQuantity: '1' }],
+  )
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const activeSkus = data.skus.filter((sku) => sku.active)
+  const availableQuantity = (skuId: string) =>
+    data.balances
+      .filter((balance) => balance.warehouseId === warehouseId && balance.skuId === skuId)
+      .reduce((total, balance) => total + balance.available, 0)
+  const updateLine = (key: number, patch: Partial<RestockRequestLineInput>) =>
+    setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)))
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (busy) return
+    const selectedSkus = new Set<string>()
+    const duplicateSku = lines.some((line) => {
+      if (selectedSkus.has(line.skuId)) return true
+      selectedSkus.add(line.skuId)
+      return false
+    })
+    if (
+      !warehouseId ||
+      !lines.length ||
+      lines.some((line) => !line.skuId) ||
+      lines.some(
+        (line) =>
+          !Number.isSafeInteger(Number(line.requestedQuantity)) ||
+          Number(line.requestedQuantity) <= 0,
+      ) ||
+      duplicateSku
+    ) {
+      setError(
+        t(
+          'Chọn kho, sản phẩm và nhập số lượng cần bổ sung hợp lệ. Mỗi sản phẩm chỉ được chọn một lần.',
+          'Select a warehouse and item, then enter a valid quantity. Each item can only be selected once.',
+        ),
+      )
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await run('purchaseRequest.create', {
+        warehouseId,
+        sourceReference: sourceReference.trim(),
+        note: note.trim(),
+        lines: lines.map((line) => ({
+          skuId: line.skuId,
+          requestedQuantity: Number(line.requestedQuantity),
+        })),
+      })
+      onCreated?.()
+      onClose()
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : t('Không gửi được yêu cầu bổ sung hàng.', 'Unable to submit the restock request.'),
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal
+      title={t('Tạo yêu cầu nhập hàng', 'Create restock request')}
+      wide
+      onClose={() => {
+        if (!busy) onClose()
+      }}
+    >
+      <form className="inv-form modal-body" onSubmit={(event) => void submit(event)}>
+        <p className="inv-note">
+          {t(
+            'Yêu cầu ghi nhận nhu cầu bổ sung, chưa làm thay đổi tồn kho. Quản lý kho sẽ tổng hợp thành đơn mua để kế toán kiểm tra và duyệt.',
+            'This records replenishment needs without changing stock. The warehouse manager will consolidate requests into a purchase order for accounting review and approval.',
+          )}
+        </p>
+        <fieldset disabled={busy} className="inv-form-grid">
+          <label>
+            <span>{t('Kho cần bổ sung', 'Warehouse to replenish')}</span>
+            <select
+              required
+              value={warehouseId}
+              onChange={(event) => setWarehouseId(event.target.value)}
+            >
+              <option value="">{t('Chọn kho', 'Select warehouse')}</option>
+              {data.warehouses
+                .filter((warehouse) => warehouse.active)
+                .map((warehouse) => (
+                  <option key={warehouse.id} value={warehouse.id}>
+                    {warehouse.code} · {warehouse.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+          <label>
+            <span>{t('Mã tham chiếu (không bắt buộc)', 'Reference (optional)')}</span>
+            <input
+              value={sourceReference}
+              maxLength={200}
+              onChange={(event) => setSourceReference(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>{t('Ghi chú', 'Note')}</span>
+            <input value={note} maxLength={1000} onChange={(event) => setNote(event.target.value)} />
+          </label>
+        </fieldset>
+        {lines.map((line, index) => (
+          <fieldset key={line.key} disabled={busy} className="inv-document-line">
+            <legend>
+              {t('Dòng hàng', 'Line')} {index + 1}
+            </legend>
+            <div className="inv-form-grid">
+              <label>
+                <span>{t('Sản phẩm', 'Product')} {index + 1}</span>
+                <select
+                  required
+                  value={line.skuId}
+                  onChange={(event) => updateLine(line.key, { skuId: event.target.value })}
+                >
+                  <option value="">{t('Chọn hàng hóa', 'Select item')}</option>
+                  {activeSkus.map((sku) => (
+                    <option key={sku.id} value={sku.id}>
+                      {sku.sku} · {sku.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>{t('Tổng số lượng cần có', 'Total quantity needed')}</span>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="1"
+                  value={line.requestedQuantity}
+                  onChange={(event) =>
+                    updateLine(line.key, { requestedQuantity: event.target.value })
+                  }
+                />
+              </label>
+            </div>
+            {line.skuId && warehouseId && (
+              <p className="inv-note">
+                {t(
+                  `Tồn khả dụng hiện tại: ${availableQuantity(line.skuId)}. Nhập tổng nhu cầu lớn hơn mức này.`,
+                  `Currently available: ${availableQuantity(line.skuId)}. Enter a total need greater than this amount.`,
+                )}
+              </p>
+            )}
+            {lines.length > 1 && (
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setLines((current) => current.filter((item) => item.key !== line.key))}
+              >
+                <Trash2 size={14} />
+                {t('Xóa dòng', 'Remove line')}
+              </button>
+            )}
+          </fieldset>
+        ))}
+        <button
+          type="button"
+          className="button button-secondary"
+          disabled={busy || !activeSkus.length || lines.length >= 100}
+          onClick={() =>
+            setLines((current) => [
+              ...current,
+              {
+                key: Math.max(...current.map((line) => line.key), 0) + 1,
+                skuId: '',
+                requestedQuantity: '1',
+              },
+            ])
+          }
+        >
+          <Plus size={14} />
+          {t('Thêm sản phẩm', 'Add item')}
+        </button>
+        {error && (
+          <p className="inv-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="inv-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            disabled={busy}
+            onClick={onClose}
+          >
+            {t('Hủy', 'Cancel')}
+          </button>
+          <button
+            className="button button-primary"
+            disabled={busy || !lines.length || !activeSkus.length}
+          >
+            {busy ? t('Đang gửi…', 'Submitting…') : t('Tạo yêu cầu', 'Create request')}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
 export function PurchaseOrderCreateForm({
   data,
+  request,
   run,
   onClose,
 }: {
   data: InventorySnapshot
+  request?: StockRestockRequest
   run: RunCommand
   onClose: () => void
 }) {
   const { t } = useI18n()
   const [warehouseId, setWarehouseId] = useState(
-    data.warehouses.find((warehouse) => warehouse.active)?.id ?? '',
+    request?.warehouseId ?? data.warehouses.find((warehouse) => warehouse.active)?.id ?? '',
   )
   const [supplierId, setSupplierId] = useState(
     data.suppliers.find((supplier) => supplier.active !== false && supplier.active !== 0)?.id ?? '',
   )
-  const [reference, setReference] = useState('')
-  const [note, setNote] = useState('')
-  const [lines, setLines] = useState<PurchaseOrderLineInput[]>([
-    { key: 1, skuId: '', locationId: '', quantity: '1', unitCost: '' },
-  ])
+  const [reference, setReference] = useState(request?.number ?? '')
+  const [note, setNote] = useState(request?.sourceReference ?? '')
+  const [lines, setLines] = useState<PurchaseOrderLineInput[]>(
+    request
+      ? request.lines.map((line, index) => ({
+          key: index + 1,
+          skuId: line.skuId,
+          locationId: '',
+          quantity: String(line.requestedQuantity),
+          unitCost: '',
+        }))
+      : [{ key: 1, skuId: '', locationId: '', quantity: '1', unitCost: '' }],
+  )
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const activeSkus = data.skus.filter((sku) => sku.active)
@@ -84,6 +345,7 @@ export function PurchaseOrderCreateForm({
         supplierId,
         ...(reference.trim() ? { reference: reference.trim() } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
+        ...(request ? { restockRequestId: request.id } : {}),
         lines: lines.map((line) => ({
           skuId: line.skuId,
           quantity: Number(line.quantity),

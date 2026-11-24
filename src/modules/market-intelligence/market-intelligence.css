@@ -361,9 +361,7 @@
 .market-summary > svg {
   margin-top: 1px;
 }
-.market-summary h3,
-.market-report-section > h3,
-.market-sources-section > h3 {
+.market-summary h3 {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -372,175 +370,11 @@
   font-size: 13px;
 }
 .market-summary p {
-  margin: 8px 0 10px;
+  margin: 8px 0 0;
   color: #55596d;
   font-size: 12px;
   line-height: 1.8;
-}
-.market-report-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 20px;
-  padding: 18px 0;
-}
-.market-report-section {
-  min-width: 0;
-}
-.market-insights {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin-top: 10px;
-}
-.market-insight {
-  padding: 13px;
-  border: 1px solid #ececf2;
-  border-radius: 9px;
-  background: #fdfdfe;
-}
-.market-insight-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.market-evidence-tag {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: #edf5ef;
-  color: #37704d;
-  font-size: 9px;
-  font-weight: 650;
-}
-.market-evidence-tag.inference {
-  background: #fff3e4;
-  color: #8c642b;
-}
-.market-evidence-tag.recommendation {
-  background: #f0edfa;
-  color: #6b589d;
-}
-.market-insight h4 {
-  margin: 9px 0 5px;
-  color: #44485c;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.market-insight > p {
-  margin: 0;
-  color: #6e7487;
-  font-size: 11px;
-  line-height: 1.7;
-}
-.market-source-references {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.market-source-references a {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px 6px;
-  border-radius: 5px;
-  background: #f0eff7;
-  color: #6f5d9d;
-  font-size: 9px;
-  font-weight: 650;
-  text-decoration: none;
-}
-.market-source-references a:hover {
-  background: #e6e1f3;
-  text-decoration: underline;
-}
-.market-limitations {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 12px;
-  border: 1px solid #efe1c7;
-  border-radius: 8px;
-  background: #fffbf2;
-  color: #836532;
-  font-size: 10px;
-  line-height: 1.6;
-}
-.market-limitations > svg {
-  flex: 0 0 auto;
-}
-.market-limitations strong {
-  font-size: 11px;
-}
-.market-limitations ul {
-  padding-left: 17px;
-  margin: 5px 0 0;
-}
-.market-sources-section {
-  padding-top: 19px;
-  margin-top: 19px;
-  border-top: 1px solid #ececf2;
-}
-.market-sources-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 11px;
-}
-.market-source {
-  min-width: 0;
-  padding: 12px;
-  border: 1px solid #e9eaf0;
-  border-radius: 8px;
-}
-.market-source-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  color: #8174a0;
-  font-size: 9px;
-  font-weight: 700;
-}
-.market-source-heading a {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: #7261a7;
-  font-weight: 600;
-  text-decoration: none;
-}
-.market-source h3 {
-  margin: 8px 0 5px;
-  font-size: 11px;
-  line-height: 1.55;
-}
-.market-source h3 a {
-  color: #47495e;
-  text-decoration: none;
-}
-.market-source h3 a:hover,
-.market-source-heading a:hover {
-  text-decoration: underline;
-}
-.market-source-meta,
-.market-source-excerpt {
-  margin: 0;
-  color: #828799;
-  font-size: 10px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-.market-source-excerpt {
-  margin-top: 7px;
-  color: #62687a;
-}
-.market-source-disclaimer {
-  margin: 10px 0 0;
-  color: #85899a;
-  font-size: 10px;
-  line-height: 1.6;
+  white-space: pre-line;
 }
 .market-report-meta {
   margin: 16px 0 0;
@@ -575,9 +409,7 @@
   .market-report {
     padding: 15px;
   }
-  .market-field-row,
-  .market-report-grid,
-  .market-sources-grid {
+  .market-field-row {
     grid-template-columns: minmax(0, 1fr);
   }
   .market-provider-list {

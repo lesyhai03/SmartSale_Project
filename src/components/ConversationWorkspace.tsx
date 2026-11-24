@@ -121,8 +121,6 @@ export function ConversationWorkspace(props: WorkspaceProps) {
         <ConversationSales
           conversation={conversation}
           customer={props.customer}
-          inbox={props.data}
-          mode={props.mode}
           onNotify={props.onNotify}
           onClose={() => setTool(null)}
         />

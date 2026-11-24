@@ -1,12 +1,35 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { Clock3, KeyRound, Plus, RefreshCw, Shield, UserRoundPlus } from 'lucide-react'
+import {
+  Activity,
+  Ban,
+  Check,
+  Clock3,
+  KeyRound,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Shield,
+  UserRoundPlus,
+} from 'lucide-react'
 import { Modal } from '../../components/shared'
 import { useI18n } from '../../i18n'
 import { InventoryApiError, inventoryService } from './service'
-import type { InventoryAccountUser, InventoryLoginEvent } from './service'
+import type { InventoryAccountActivity, InventoryAccountUser, InventoryLoginEvent } from './service'
 
-const roles = ['receiver', 'issuer', 'counter', 'approver', 'staff', 'viewer']
+const roles = [
+  'admin',
+  'manager',
+  'accountant',
+  'staff',
+  'receiver',
+  'issuer',
+  'counter',
+  'approver',
+  'viewer',
+]
 
 type PermissionGroupKey =
   | 'warehouse'
@@ -18,6 +41,7 @@ type PermissionGroupKey =
   | 'afterSales'
   | 'sales'
   | 'business'
+  | 'accounting'
   | 'other'
 
 const permissionGroups: {
@@ -29,11 +53,12 @@ const permissionGroups: {
   { key: 'catalog', vi: 'Sản phẩm và nhà cung cấp', en: 'Products and suppliers' },
   { key: 'documents', vi: 'Chứng từ kho', en: 'Inventory documents' },
   { key: 'reservations', vi: 'Giữ hàng', en: 'Stock reservations' },
-  { key: 'purchasing', vi: 'Đơn mua hàng', en: 'Purchase orders' },
+  { key: 'purchasing', vi: 'Yêu cầu nhập và đơn mua', en: 'Restock requests and purchase orders' },
   { key: 'stocktake', vi: 'Kiểm kê', en: 'Stocktakes' },
   { key: 'afterSales', vi: 'Bảo hành và chất lượng', en: 'Warranty and quality' },
   { key: 'sales', vi: 'Đơn bán hàng', en: 'Sales orders' },
   { key: 'business', vi: 'Vận hành và chăm sóc khách hàng', en: 'Operations and customer care' },
+  { key: 'accounting', vi: 'Kế toán', en: 'Accounting' },
   { key: 'other', vi: 'Quyền khác', en: 'Other permissions' },
 ]
 
@@ -110,6 +135,21 @@ const permissionLabels: Record<string, { group: PermissionGroupKey; vi: string; 
     vi: 'Giải phóng hàng đang được giữ',
     en: 'Release reserved stock',
   },
+  'purchaseRequest.create': {
+    group: 'purchasing',
+    vi: 'Tạo yêu cầu nhập hàng trong Kho',
+    en: 'Create a restock request in Inventory',
+  },
+  'purchaseRequest.read': {
+    group: 'purchasing',
+    vi: 'Xem yêu cầu nhập hàng của mình',
+    en: 'View own restock requests',
+  },
+  'purchaseRequest.manage': {
+    group: 'purchasing',
+    vi: 'Quản lý yêu cầu nhập hàng',
+    en: 'Manage restock requests',
+  },
   'purchaseOrder.create': {
     group: 'purchasing',
     vi: 'Tạo đơn mua hàng',
@@ -129,6 +169,16 @@ const permissionLabels: Record<string, { group: PermissionGroupKey; vi: string; 
     group: 'purchasing',
     vi: 'Xác nhận nhận hàng mua',
     en: 'Confirm receipt of purchased goods',
+  },
+  'accounting.read': {
+    group: 'accounting',
+    vi: 'Xem sổ kế toán và báo cáo tài chính nội bộ',
+    en: 'View the ledger and internal financial reports',
+  },
+  'accounting.post': {
+    group: 'accounting',
+    vi: 'Ghi sổ và đảo bút toán kế toán',
+    en: 'Post and reverse accounting journal entries',
   },
   'count.create': {
     group: 'stocktake',
@@ -262,6 +312,28 @@ export default function EmployeeManagement({
   const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [loginEvents, setLoginEvents] = useState<InventoryLoginEvent[]>([])
+  const [activityUser, setActivityUser] = useState<InventoryAccountUser | null>(null)
+  const [activityEvents, setActivityEvents] = useState<InventoryAccountActivity[]>([])
+  const [query, setQuery] = useState('')
+  const [currentTime, setCurrentTime] = useState(() => Date.now())
+  const [roleFilter, setRoleFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [roleUser, setRoleUser] = useState<InventoryAccountUser | null>(null)
+  const [selectedRole, setSelectedRole] = useState('')
+  const [newUserRole, setNewUserRole] = useState('receiver')
+  const assignableRoles = roles.filter((role) => currentRole !== 'admin' || role !== 'admin')
+  const filteredUsers = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase()
+    return users.filter((user) => {
+      const matchesQuery =
+        !normalizedQuery ||
+        `${user.name} ${user.email ?? ''}`.toLocaleLowerCase().includes(normalizedQuery)
+      const matchesRole = roleFilter === 'all' || user.role === roleFilter
+      const matchesStatus =
+        statusFilter === 'all' || (statusFilter === 'active' ? user.active : !user.active)
+      return matchesQuery && matchesRole && matchesStatus
+    })
+  }, [query, roleFilter, statusFilter, users])
   const groupedPermissions = permissionActions.reduce<
     Partial<Record<PermissionGroupKey, string[]>>
   >((groups, permission) => {
@@ -274,15 +346,23 @@ export default function EmployeeManagement({
   const selectedPermissionCount = permissionActions.filter((permission) =>
     selectedPermissions.includes(permission),
   ).length
+  const activeCount = users.filter((user) => user.active).length
+  const isUserOnline = (user: InventoryAccountUser) =>
+    user.isOnline &&
+    user.lastActivityAt !== null &&
+    Date.parse(user.lastActivityAt) >= currentTime - 5 * 60 * 1000
+  const onlineCount = users.filter(isUserOnline).length
+  const privilegedCount = users.filter((user) => ['admin', 'manager'].includes(user.role)).length
 
   const roleName = (role: string) =>
     ({
       owner: t('Chủ doanh nghiệp', 'Owner'),
       admin: t('Quản trị viên', 'Administrator'),
       manager: t('Quản lý', 'Manager'),
+      accountant: t('Kế toán', 'Accountant'),
       receiver: t(
-        'Nhân viên kho · thêm hàng và nhập kho',
-        'Stock operator · products and receipts',
+        'Nhân viên kho · quản lý sản phẩm và chứng từ kho',
+        'Stock operator · products and stock documents',
       ),
       issuer: t('Nhân viên xuất hàng', 'Issuing'),
       counter: t('Nhân viên kiểm kê', 'Stock counting'),
@@ -290,6 +370,56 @@ export default function EmployeeManagement({
       staff: t('Nhân viên', 'Staff'),
       viewer: t('Chỉ xem', 'Read only'),
     })[role] ?? role
+  const roleDescription = (role: string) =>
+    ({
+      owner: t('Toàn quyền quản trị doanh nghiệp.', 'Full business administration.'),
+      admin: t(
+        'Quản trị, báo cáo và phân tích; không có quyền nghiệp vụ theo mặc định.',
+        'Administration, reports and insights; no operational access by default.',
+      ),
+      manager: t(
+        'Quản lý các nghiệp vụ bán hàng, chăm sóc và kho.',
+        'Manages sales, care and inventory operations.',
+      ),
+      accountant: t(
+        'Kiểm tra và duyệt đơn mua trước khi kho được nhận hàng.',
+        'Reviews and approves purchase orders before inventory can receive goods.',
+      ),
+      receiver: t(
+        'Quản lý sản phẩm và xử lý chứng từ kho được phân quyền; không nhận đơn mua trực tiếp.',
+        'Manages products and permitted stock documents; cannot receive purchase orders directly.',
+      ),
+      issuer: t('Tạo và xử lý đơn bán.', 'Creates and processes sales orders.'),
+      counter: t('Ghi nhận kiểm kê kho.', 'Records inventory counts.'),
+      approver: t('Duyệt chứng từ và kiểm kê.', 'Approves documents and stocktakes.'),
+      staff: t(
+        'Xử lý công việc và hội thoại được giao.',
+        'Handles assigned work and conversations.',
+      ),
+      viewer: t('Chỉ xem dữ liệu được cấp.', 'Read-only access to assigned data.'),
+    })[role] ?? t('Quyền tùy chỉnh theo tài khoản.', 'Custom account permissions.')
+  const activityLabel = (action: string) => {
+    const labels: Record<string, [string, string]> = {
+      'login.success': ['Đăng nhập thành công', 'Signed in'],
+      'login.failure': ['Đăng nhập thất bại', 'Sign-in failed'],
+      'account.user.create': ['Tạo tài khoản', 'Created an account'],
+      'account.user.update': ['Cập nhật tài khoản', 'Updated an account'],
+      'account.user.permissions.update': ['Thay đổi quyền', 'Changed permissions'],
+      'account.user.password.reset': ['Đặt lại mật khẩu', 'Reset a password'],
+      'account.password.change': ['Đổi mật khẩu', 'Changed password'],
+      'customer.created': ['Tạo khách hàng', 'Created a customer'],
+      'customer.updated': ['Cập nhật khách hàng', 'Updated a customer'],
+      'conversation.updated': ['Cập nhật hội thoại', 'Updated a conversation'],
+      'conversation.message.sent': ['Gửi tin nhắn', 'Sent a message'],
+      'conversation.note.created': ['Thêm ghi chú hội thoại', 'Added a conversation note'],
+      'order.created': ['Tạo đơn hàng', 'Created an order'],
+      'shipment.created': ['Tạo vận đơn', 'Created a shipment'],
+      'ticket.created': ['Tạo yêu cầu chăm sóc', 'Created a care ticket'],
+    }
+    const knownLabel = labels[action]
+    if (knownLabel) return t(knownLabel[0], knownLabel[1])
+    return action.replace(/[._-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toLocaleUpperCase())
+  }
 
   const loadUsers = useCallback(async () => {
     setLoading(true)
@@ -311,6 +441,11 @@ export default function EmployeeManagement({
   useEffect(() => {
     void loadUsers()
   }, [loadUsers])
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setCurrentTime(Date.now()), 30_000)
+    return () => window.clearInterval(interval)
+  }, [])
 
   const createUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -367,6 +502,43 @@ export default function EmployeeManagement({
     }
   }
 
+  const showRoleEditor = (user: InventoryAccountUser) => {
+    setSelectedRole(user.role)
+    setRoleUser(user)
+  }
+
+  const saveRole = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (busy || !roleUser) return
+    if (selectedRole === roleUser.role) {
+      setRoleUser(null)
+      return
+    }
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      await inventoryService.updateUser(roleUser.id, { role: selectedRole })
+      setRoleUser(null)
+      setNotice(
+        t(
+          'Đã cập nhật vai trò và thu hồi phiên đăng nhập cũ.',
+          'Role updated; previous sessions were revoked.',
+        ),
+      )
+      await loadUsers()
+    } catch (cause) {
+      if (cause instanceof InventoryApiError && cause.status === 401) onSessionExpired()
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : t('Không cập nhật được vai trò.', 'Unable to update the role.'),
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const resetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (busy || !passwordUser) return
@@ -408,6 +580,25 @@ export default function EmployeeManagement({
         cause instanceof Error
           ? cause.message
           : t('Không tải được lịch sử đăng nhập.', 'Unable to load login history.'),
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const showUserActivity = async (user: InventoryAccountUser) => {
+    if (busy) return
+    setBusy(true)
+    setError('')
+    try {
+      setActivityEvents(await inventoryService.listUserActivity(user.id))
+      setActivityUser(user)
+    } catch (cause) {
+      if (cause instanceof InventoryApiError && cause.status === 401) onSessionExpired()
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : t('Không tải được lịch sử hoạt động.', 'Unable to load activity history.'),
       )
     } finally {
       setBusy(false)
@@ -476,11 +667,11 @@ export default function EmployeeManagement({
       <section className="inv-panel">
         <header>
           <div className="inv-section-title">
-            <h2>{t('Tài khoản nhân viên', 'Employee accounts')}</h2>
+            <h2>{t('Danh sách tài khoản', 'Account directory')}</h2>
             <p className="inv-note">
               {t(
-                'Tạo tài khoản riêng và chọn vai trò. Nhân viên kho có thể thêm sản phẩm và nhập hàng; không cần mã truy cập riêng.',
-                'Create individual accounts and assign roles. Stock operators can add products and receive goods without a separate access token.',
+                'Trạng thái online dựa trên hoạt động thực tế 5 phút gần nhất; lịch sử ghi lại đăng nhập và thao tác.',
+                'Online status reflects activity within 5 minutes; history records sign-ins and actions.',
               )}
             </p>
           </div>
@@ -504,7 +695,10 @@ export default function EmployeeManagement({
             <button
               className="button button-primary"
               disabled={busy}
-              onClick={() => setFormOpen(true)}
+              onClick={() => {
+                setNewUserRole('receiver')
+                setFormOpen(true)
+              }}
             >
               <Plus size={14} />
               {t('Tạo tài khoản', 'Create account')}
@@ -526,73 +720,229 @@ export default function EmployeeManagement({
             {t('Đang tải danh sách nhân viên…', 'Loading employee accounts…')}
           </p>
         ) : (
-          <div className="inv-table-scroll">
-            <table className="inv-table">
-              <thead>
-                <tr>
-                  <th scope="col">{t('Nhân viên', 'Employee')}</th>
-                  <th scope="col">{t('Vai trò', 'Role')}</th>
-                  <th scope="col">{t('Trạng thái', 'Status')}</th>
-                  <th scope="col">{t('Thao tác', 'Actions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((user) => (
-                  <tr key={user.id}>
-                    <td>
-                      <strong>{user.name}</strong>
-                      <small>{user.email || '—'}</small>
-                    </td>
-                    <td>{roleName(user.role)}</td>
-                    <td>
-                      <span
-                        className={`inv-tag ${user.active ? 'inv-tag-posted' : 'inv-tag-cancelled'}`}
-                      >
-                        {user.active ? t('Đang hoạt động', 'Active') : t('Đã khóa', 'Disabled')}
-                      </span>
-                    </td>
-                    <td>
-                      {user.role !== 'owner' &&
-                        (currentRole === 'owner' || user.role !== 'admin') && (
-                          <div className="inv-actions">
-                            <button
-                              className="button button-secondary"
-                              disabled={busy}
-                              onClick={() => void toggleUser(user)}
-                            >
-                              {user.active ? t('Tạm khóa', 'Disable') : t('Kích hoạt', 'Enable')}
-                            </button>
-                            <button
-                              className="button button-secondary"
-                              disabled={busy}
-                              onClick={() => setPasswordUser(user)}
-                            >
-                              <KeyRound size={14} />
-                              {t('Đặt lại mật khẩu', 'Reset password')}
-                            </button>
-                            <button
-                              className="button button-secondary"
-                              disabled={busy}
-                              onClick={() => void showPermissions(user)}
-                            >
-                              <Shield size={14} />
-                              {t('Phân quyền', 'Permissions')}
-                            </button>
-                          </div>
-                        )}
-                    </td>
-                  </tr>
-                ))}
-                {!users.length && (
+          <>
+            <div
+              className="admin-account-summary"
+              aria-label={t('Tổng quan tài khoản', 'Account summary')}
+            >
+              <article>
+                <span>{t('Tổng tài khoản', 'Total accounts')}</span>
+                <strong>{users.length}</strong>
+                <small>{t('Trong doanh nghiệp', 'In this business')}</small>
+              </article>
+              <article>
+                <span>{t('Đang hoạt động', 'Active now')}</span>
+                <strong>{onlineCount}</strong>
+                <small>{t('Có hoạt động trong 5 phút', 'Active within 5 minutes')}</small>
+              </article>
+              <article>
+                <span>{t('Đã tạm khóa', 'Suspended')}</span>
+                <strong>{users.length - activeCount}</strong>
+                <small>{t('Không thể đăng nhập', 'Cannot sign in')}</small>
+              </article>
+              <article>
+                <span>{t('Quản trị & quản lý', 'Admins & managers')}</span>
+                <strong>{privilegedCount}</strong>
+                <small>{t('Tài khoản có quyền quản lý', 'Accounts with management roles')}</small>
+              </article>
+            </div>
+            <div className="admin-account-filters">
+              <label className="admin-account-search">
+                <span>{t('Tìm nhân viên', 'Search employees')}</span>
+                <div>
+                  <Search size={15} aria-hidden="true" />
+                  <input
+                    aria-label={t('Tìm theo tên hoặc email', 'Search by name or email')}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={t('Tên hoặc email đăng nhập', 'Name or sign-in email')}
+                  />
+                </div>
+              </label>
+              <label>
+                <span>{t('Vai trò', 'Role')}</span>
+                <select
+                  aria-label={t('Lọc theo vai trò', 'Filter by role')}
+                  value={roleFilter}
+                  onChange={(event) => setRoleFilter(event.target.value)}
+                >
+                  <option value="all">{t('Tất cả vai trò', 'All roles')}</option>
+                  {[...new Set(['owner', ...roles, ...users.map((user) => user.role)])].map(
+                    (role) => (
+                      <option key={role} value={role}>
+                        {roleName(role)}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </label>
+              <label>
+                <span>{t('Quyền đăng nhập', 'Account access')}</span>
+                <select
+                  aria-label={t('Lọc theo trạng thái', 'Filter by status')}
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value)}
+                >
+                  <option value="all">{t('Tất cả trạng thái', 'All statuses')}</option>
+                  <option value="active">{t('Được phép đăng nhập', 'Sign-in enabled')}</option>
+                  <option value="inactive">{t('Đã khóa', 'Suspended')}</option>
+                </select>
+              </label>
+            </div>
+            <div className="inv-table-scroll">
+              <table className="inv-table admin-account-table">
+                <thead>
                   <tr>
-                    <td colSpan={4} className="inv-empty">
-                      {t('Chưa có tài khoản nhân viên.', 'No employee accounts yet.')}
-                    </td>
+                    <th scope="col">{t('Nhân viên & tài khoản', 'Employee & account')}</th>
+                    <th scope="col">{t('Vai trò', 'Role')}</th>
+                    <th scope="col">{t('Quyền phân hệ', 'Module permissions')}</th>
+                    <th scope="col">{t('Hoạt động thực tế', 'Recent activity')}</th>
+                    <th scope="col">{t('Quyền đăng nhập', 'Account access')}</th>
+                    <th scope="col">{t('Thao tác', 'Actions')}</th>
                   </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filteredUsers.map((user) => (
+                    <tr key={user.id}>
+                      <td>
+                        <strong>{user.name}</strong>
+                        <small>{user.email || '—'}</small>
+                      </td>
+                      <td>
+                        <strong>{roleName(user.role)}</strong>
+                        <small>{roleDescription(user.role)}</small>
+                      </td>
+                      <td>
+                        <strong>{user.permissions?.length ?? 0}</strong>
+                        <small>{t('quyền trong danh mục', 'catalog permissions')}</small>
+                      </td>
+                      <td>
+                        <span
+                          className={`admin-activity-status ${isUserOnline(user) ? 'is-online' : ''}`}
+                        >
+                          <span aria-hidden="true" />
+                          {isUserOnline(user)
+                            ? t('Đang hoạt động', 'Active now')
+                            : user.lastActivityAt
+                              ? t('Ngoại tuyến', 'Offline')
+                              : t('Chưa hoạt động', 'No activity')}
+                        </span>
+                        <small>
+                          {user.lastActivityAt
+                            ? `${t('Gần nhất', 'Last seen')}: ${new Date(user.lastActivityAt).toLocaleString()}`
+                            : t('Chưa ghi nhận hoạt động', 'No activity recorded')}
+                        </small>
+                      </td>
+                      <td>
+                        <span
+                          className={`inv-tag ${user.active ? 'inv-tag-posted' : 'inv-tag-cancelled'}`}
+                        >
+                          {user.active
+                            ? t('Được phép đăng nhập', 'Sign-in enabled')
+                            : t('Đã khóa', 'Disabled')}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="inv-actions admin-account-actions">
+                          <button
+                            className="button button-secondary"
+                            aria-label={t(
+                              `Lịch sử hoạt động · ${user.name}`,
+                              `Activity history · ${user.name}`,
+                            )}
+                            disabled={busy}
+                            onClick={() => void showUserActivity(user)}
+                          >
+                            <Activity size={14} />
+                            {t('Lịch sử', 'Activity')}
+                          </button>
+                          {user.role !== 'owner' &&
+                            (currentRole === 'owner' || user.role !== 'admin') && (
+                              <details className="admin-account-menu">
+                                <summary
+                                  role="button"
+                                  aria-label={t(
+                                    `Thao tác tài khoản · ${user.name}`,
+                                    `Account actions · ${user.name}`,
+                                  )}
+                                  title={t('Thao tác khác', 'More actions')}
+                                >
+                                  <MoreHorizontal size={17} />
+                                </summary>
+                                <div className="admin-account-menu-popover">
+                                  <button
+                                    type="button"
+                                    aria-label={t(
+                                      `Đổi vai trò · ${user.name}`,
+                                      `Change role · ${user.name}`,
+                                    )}
+                                    disabled={busy}
+                                    onClick={(event) => {
+                                      showRoleEditor(user)
+                                      event.currentTarget.closest('details')?.removeAttribute('open')
+                                    }}
+                                  >
+                                    <Pencil size={14} />
+                                    {t('Vai trò', 'Role')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={(event) => {
+                                      void toggleUser(user)
+                                      event.currentTarget.closest('details')?.removeAttribute('open')
+                                    }}
+                                  >
+                                    {user.active ? <Ban size={14} /> : <Check size={14} />}
+                                    {user.active
+                                      ? t('Tạm khóa', 'Disable')
+                                      : t('Kích hoạt', 'Enable')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={(event) => {
+                                      setPasswordUser(user)
+                                      event.currentTarget.closest('details')?.removeAttribute('open')
+                                    }}
+                                  >
+                                    <KeyRound size={14} />
+                                    {t('Đặt lại mật khẩu', 'Reset password')}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={busy}
+                                    onClick={(event) => {
+                                      void showPermissions(user)
+                                      event.currentTarget.closest('details')?.removeAttribute('open')
+                                    }}
+                                  >
+                                    <Shield size={14} />
+                                    {t('Phân quyền', 'Permissions')}
+                                  </button>
+                                </div>
+                              </details>
+                            )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!filteredUsers.length && (
+                    <tr>
+                      <td colSpan={6} className="inv-empty">
+                        {users.length
+                          ? t(
+                              'Không có tài khoản phù hợp bộ lọc.',
+                              'No accounts match these filters.',
+                            )
+                          : t('Chưa có tài khoản nhân viên.', 'No employee accounts yet.')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
       {formOpen && (
@@ -625,14 +975,22 @@ export default function EmployeeManagement({
               </label>
               <label>
                 <span>{t('Vai trò', 'Role')} *</span>
-                <select name="role" defaultValue="receiver" required>
-                  {roles.map((role) => (
+                <select
+                  name="role"
+                  value={newUserRole}
+                  onChange={(event) => setNewUserRole(event.target.value)}
+                  required
+                >
+                  {assignableRoles.map((role) => (
                     <option key={role} value={role}>
                       {roleName(role)}
                     </option>
                   ))}
                 </select>
               </label>
+              <small className="admin-account-role-description">
+                {roleDescription(newUserRole)}
+              </small>
             </fieldset>
             <p className="inv-note">
               {t(
@@ -652,6 +1010,58 @@ export default function EmployeeManagement({
               <button className="button button-primary" disabled={busy}>
                 {busy ? <RefreshCw size={14} className="spin" /> : <UserRoundPlus size={14} />}
                 {t('Tạo tài khoản', 'Create account')}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+      {roleUser && (
+        <Modal
+          title={t(`Đổi vai trò · ${roleUser.name}`, `Change role · ${roleUser.name}`)}
+          onClose={() => {
+            if (!busy) setRoleUser(null)
+          }}
+        >
+          <form className="inv-form modal-body" onSubmit={(event) => void saveRole(event)}>
+            <p className="inv-note">
+              {t(
+                `Vai trò hiện tại: ${roleName(roleUser.role)}. Đổi vai trò sẽ xóa quyền tùy chỉnh và thu hồi phiên đăng nhập cũ.`,
+                `Current role: ${roleName(roleUser.role)}. Changing the role clears custom permissions and revokes existing sessions.`,
+              )}
+            </p>
+            <fieldset disabled={busy}>
+              <label>
+                <span>{t('Vai trò mới', 'New role')} *</span>
+                <select
+                  aria-label={t('Vai trò mới', 'New role')}
+                  value={selectedRole}
+                  onChange={(event) => setSelectedRole(event.target.value)}
+                  required
+                >
+                  {assignableRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {roleName(role)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </fieldset>
+            <p className="admin-account-role-description">{roleDescription(selectedRole)}</p>
+            <div className="inv-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                disabled={busy}
+                onClick={() => setRoleUser(null)}
+              >
+                {t('Hủy', 'Cancel')}
+              </button>
+              <button
+                className="button button-primary"
+                disabled={busy || selectedRole === roleUser.role}
+              >
+                {busy ? <RefreshCw size={14} className="spin" /> : <Pencil size={14} />}
+                {t('Lưu vai trò', 'Save role')}
               </button>
             </div>
           </form>
@@ -736,6 +1146,58 @@ export default function EmployeeManagement({
                   <tr>
                     <td colSpan={4} className="inv-empty">
                       {t('Chưa có lịch sử đăng nhập.', 'No login history yet.')}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
+      {activityUser && (
+        <Modal
+          title={t(
+            `Lịch sử hoạt động · ${activityUser.name}`,
+            `Activity history · ${activityUser.name}`,
+          )}
+          onClose={() => {
+            if (!busy) setActivityUser(null)
+          }}
+        >
+          <div className="inv-table-scroll modal-body">
+            <table className="inv-table">
+              <thead>
+                <tr>
+                  <th scope="col">{t('Hoạt động', 'Activity')}</th>
+                  <th scope="col">{t('Chi tiết', 'Details')}</th>
+                  <th scope="col">{t('Thời gian', 'Time')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activityEvents.map((event) => (
+                  <tr key={event.id}>
+                    <td>{activityLabel(event.action)}</td>
+                    <td>
+                      {event.description ??
+                        (event.kind === 'login'
+                          ? event.succeeded
+                            ? t('Đăng nhập thành công', 'Sign-in succeeded')
+                            : t('Sai thông tin đăng nhập', 'Invalid sign-in credentials')
+                          : event.entityId
+                            ? `${t('Mã liên quan', 'Related ID')}: ${event.entityId}`
+                            : '—')}
+                    </td>
+                    <td>
+                      <time dateTime={event.createdAt}>
+                        {new Date(event.createdAt).toLocaleString()}
+                      </time>
+                    </td>
+                  </tr>
+                ))}
+                {!activityEvents.length && (
+                  <tr>
+                    <td colSpan={3} className="inv-empty">
+                      {t('Chưa ghi nhận hoạt động nào.', 'No activity recorded yet.')}
                     </td>
                   </tr>
                 )}

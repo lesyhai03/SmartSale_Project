@@ -816,13 +816,17 @@ export function DocumentForm({
   data,
   run,
   onClose,
+  canCreateStandaloneReceipt,
 }: {
   data: InventorySnapshot
   run: RunCommand
   onClose: () => void
+  canCreateStandaloneReceipt: boolean
 }) {
   const { t } = useI18n()
-  const [type, setType] = useState<DocumentType>('receipt')
+  const [type, setType] = useState<DocumentType>(
+    canCreateStandaloneReceipt ? 'receipt' : 'issue',
+  )
   const [warehouseId, setWarehouseId] = useState(
     data.warehouses.find((warehouse) => warehouse.active)?.id ?? '',
   )
@@ -864,6 +868,15 @@ export function DocumentForm({
     setError('')
     if (type === 'transfer' && targetWarehouseId === warehouseId) {
       setError(t('Kho nguồn và kho đích phải khác nhau.', 'Source and destination must differ.'))
+      return
+    }
+    if (type === 'receipt' && !canCreateStandaloneReceipt && !returnToStock) {
+      setError(
+        t(
+          'Phiếu nhập mua phải được tạo từ đơn mua đã được kế toán duyệt.',
+          'Purchase receipts must be created from a purchase order approved by accounting.',
+        ),
+      )
       return
     }
     if (
@@ -957,11 +970,16 @@ export function DocumentForm({
             <select
               value={type}
               onChange={(event) => {
-                setType(event.target.value as DocumentType)
-                setReturnToStock(false)
+                const nextType = event.target.value as DocumentType
+                setType(nextType)
+                setReturnToStock(nextType === 'receipt' && !canCreateStandaloneReceipt)
               }}
             >
-              <option value="receipt">{t('Nhập kho', 'Receipt')}</option>
+              <option value="receipt">
+                {canCreateStandaloneReceipt
+                  ? t('Nhập kho', 'Receipt')
+                  : t('Hàng khách trả', 'Customer return')}
+              </option>
               <option value="issue">{t('Xuất kho', 'Issue')}</option>
               <option value="transfer">{t('Điều chuyển', 'Transfer')}</option>
               <option value="adjustment">
@@ -1011,7 +1029,7 @@ export function DocumentForm({
               </select>
             </label>
           )}
-          {type === 'receipt' && (
+          {type === 'receipt' && canCreateStandaloneReceipt && (
             <label>
               <span>{t('Nhà cung cấp', 'Supplier')}</span>
               <select value={supplierId} onChange={(event) => setSupplierId(event.target.value)}>
@@ -1024,7 +1042,7 @@ export function DocumentForm({
               </select>
             </label>
           )}
-          {type === 'receipt' && (
+          {type === 'receipt' && canCreateStandaloneReceipt && (
             <label className="inv-checkbox">
               <span>
                 {t('Nhập lại hàng đã xuất / khách trả', 'Return previously issued stock')}
@@ -1035,6 +1053,14 @@ export function DocumentForm({
                 onChange={(event) => setReturnToStock(event.target.checked)}
               />
             </label>
+          )}
+          {type === 'receipt' && !canCreateStandaloneReceipt && (
+            <p className="inv-note inv-panel-note">
+              {t(
+                'Phiếu nhập trong biểu mẫu này chỉ dùng cho hàng khách trả có tham chiếu phiếu xuất gốc.',
+                'Receipts in this form are only for customer returns linked to an original issue.',
+              )}
+            </p>
           )}
           {returnToStock && (
             <label>

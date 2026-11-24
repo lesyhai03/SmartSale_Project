@@ -266,21 +266,10 @@ export default function AdminPage() {
         </div>
       )}
       {isTeamPage ? (
-        <section className="admin-employee-section">
-          <header>
-            <h2>{t('Tài khoản nhân viên', 'Employee accounts')}</h2>
-            <p>
-              {t(
-                'Cấp vai trò theo đúng bộ phận và chỉ bật những quyền cần thiết.',
-                'Assign each person to the right department and grant only the permissions they need.',
-              )}
-            </p>
-          </header>
-          <EmployeeManagement
-            currentRole={access.role}
-            onSessionExpired={notifyAuthenticationExpired}
-          />
-        </section>
+        <EmployeeManagement
+          currentRole={access.role}
+          onSessionExpired={notifyAuthenticationExpired}
+        />
       ) : section === 'sales' ? (
         <SalesReport inbox={inbox} data={data} overview={overview} now={now} />
       ) : section === 'care' ? (

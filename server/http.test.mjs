@@ -54,13 +54,11 @@ describe('Inventory HTTP API with migrated database', () => {
     integrationSettingsService = createIntegrationSettings(db, {
       encryptionKey: Buffer.alloc(32, 7).toString('base64'),
       defaults: {
-        gemini: { apiKey: '', model: 'gemini-2.5-flash' },
-        serpapi: { apiKey: '' },
+        gemini: { apiKey: '', model: 'gemini-3.8-flash' },
         telegram: { botToken: '' },
       },
       fetchImpl: async (url) => {
         const target = String(url)
-        if (target.includes('serpapi.com')) return Response.json({ account_status: 'Active' })
         if (target.includes('telegram.org'))
           return Response.json({
             ok: true,
@@ -130,10 +128,10 @@ describe('Inventory HTTP API with migrated database', () => {
 
     const status = await request('/market-intelligence/status', { headers: authorize() })
     expect(status.response.status).toBe(200)
-    expect(status.body.providers).toMatchObject({
-      search: { name: 'SerpAPI' },
-      analysis: { name: 'Google Gemini', model: 'gemini-2.5-flash' },
+    expect(status.body).toMatchObject({
+      provider: { name: 'Google Gemini', model: 'gemini-3.8-flash' },
     })
+    expect(status.body).not.toHaveProperty('providers.search')
     expect(JSON.stringify(status.body)).not.toContain('API_KEY')
 
     const forbidden = await request('/market-intelligence/runs', {
@@ -144,6 +142,50 @@ describe('Inventory HTTP API with migrated database', () => {
     const history = await request('/market-intelligence/runs', { headers: authorize() })
     expect(history.response.status).toBe(200)
     expect(history.body).toEqual({ runs: [] })
+  })
+
+  it('serves tenant-scoped accounting ledgers only to users with explicit accounting access', async () => {
+    const unauthenticated = await request('/accounting/accounts')
+    expect(unauthenticated.response.status).toBe(401)
+
+    const forbidden = await request('/accounting/accounts', { headers: authorize(tokens.viewer) })
+    expect(forbidden.response.status).toBe(403)
+
+    const accounts = await request('/accounting/accounts', { headers: authorize() })
+    expect(accounts.response.status).toBe(200)
+    expect(accounts.body).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'A-CASH' })]),
+    )
+
+    const posted = await request('/accounting/journals', {
+      method: 'POST',
+      headers: { ...authorize(), 'Content-Type': 'application/json', Origin: origin },
+      body: JSON.stringify({
+        entryDate: '2026-11-17',
+        memo: 'Ghi nhận doanh thu thử nghiệm',
+        sourceType: 'sale',
+        sourceReference: 'SO-100',
+        lines: [
+          { accountCode: 'A-CASH', debit: 10000, credit: 0 },
+          { accountCode: 'R-SALES', debit: 0, credit: 10000 },
+        ],
+      }),
+    })
+    expect(posted.response.status).toBe(201)
+
+    const trialBalance = await request('/accounting/trial-balance?from=2026-11-01&to=2026-11-30', {
+      headers: authorize(),
+    })
+    expect(trialBalance.response.status).toBe(200)
+    expect(trialBalance.body.totals).toMatchObject({ periodDebit: 10000, periodCredit: 10000 })
+
+    const duplicatedFilter = await request('/accounting/journals?limit=10&limit=20', {
+      headers: authorize(),
+    })
+    expect(duplicatedFilter.response.status).toBe(400)
+    const tenantB = await request('/accounting/journals', { headers: authorize(tokens.other) })
+    expect(tenantB.response.status).toBe(200)
+    expect(tenantB.body.entries).toEqual([])
   })
 
   it('tests, saves, and disconnects encrypted integration credentials for administrators only', async () => {
@@ -158,7 +200,7 @@ describe('Inventory HTTP API with migrated database', () => {
     expect(initial.body.providers.gemini.configured).toBe(false)
     expect(initial.body.canSaveCredentials).toBe(true)
 
-    const credentials = { apiKey: 'gemini-secret-key-value', model: 'gemini-2.5-flash' }
+    const credentials = { apiKey: 'gemini-secret-key-value', model: 'gemini-3.8-flash' }
     const tested = await request('/integrations/settings/gemini/test', {
       method: 'POST',
       headers: { ...authorize(), 'Content-Type': 'application/json' },

@@ -7,8 +7,7 @@ const encryptionKey = Buffer.alloc(32, 7).toString('base64')
 const owner = { userId: 'owner-a', tenantId: 'tenant-a', role: 'owner' }
 const staff = { userId: 'staff-a', tenantId: 'tenant-a', role: 'staff' }
 const defaults = {
-  gemini: { apiKey: '', model: 'gemini-2.5-flash' },
-  serpapi: { apiKey: '' },
+  gemini: { apiKey: '', model: 'gemini-3.8-flash' },
   telegram: { botToken: '' },
 }
 
@@ -51,8 +50,6 @@ describe('integration settings', () => {
       const target = String(url)
       if (target.includes('telegram.org'))
         return Response.json({ ok: true, result: { id: 123, is_bot: true, username: 'StoreBot' } })
-      if (target.includes('serpapi.com'))
-        return Response.json({ account_status: 'Active', total_searches_left: 100 })
       if (target.includes('shopeemobile.com'))
         return Response.json({ response: { shop_name: 'Smart Store Shopee' } })
       if (target.includes('lazada.vn'))
@@ -80,23 +77,20 @@ describe('integration settings', () => {
   it('tests and stores provider credentials encrypted and scoped to the workspace', async () => {
     const gemini = await service.save(owner, 'gemini', {
       apiKey: 'gemini-secret-key-value',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
     })
-    const serpapi = await service.save(owner, 'serpapi', { apiKey: 'serp-secret-key-value' })
     const telegram = await service.save(owner, 'telegram', {
       botToken: '123456789:abcdefghijklmnopqrstuvwxyz_123456',
     })
 
     expect(gemini.accountName).toBe('Google Gemini')
-    expect(serpapi.accountName).toBe('SerpAPI')
     expect(telegram.accountName).toBe('@StoreBot')
     expect(gemini.status.providers.gemini).toMatchObject({
       configured: true,
       source: 'workspace',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
     })
     expect(service.credentialsFor(owner, 'gemini').apiKey).toBe('gemini-secret-key-value')
-    expect(service.credentialsFor(owner, 'serpapi').apiKey).toBe('serp-secret-key-value')
     expect(service.credentialsFor(owner, 'telegram').botToken).toBe(
       '123456789:abcdefghijklmnopqrstuvwxyz_123456',
     )
@@ -104,13 +98,12 @@ describe('integration settings', () => {
     const stored = db
       .prepare('SELECT ciphertext,nonce,auth_tag FROM integration_credentials ORDER BY provider')
       .all()
-    expect(stored).toHaveLength(3)
+    expect(stored).toHaveLength(2)
     expect(JSON.stringify(stored)).not.toContain('secret-key-value')
     expect(
       JSON.stringify({
         status: service.status(owner),
         gemini,
-        serpapi,
         telegram,
       }),
     ).not.toMatch(/secret-key-value|abcdefghijklmnopqrstuvwxyz/)
@@ -118,21 +111,39 @@ describe('integration settings', () => {
       service.status({ ...owner, tenantId: 'tenant-b', userId: 'owner-b' }).providers,
     ).toMatchObject({
       gemini: { configured: false },
-      serpapi: { configured: false },
       telegram: { configured: false },
     })
   })
 
   it('allows checking credentials without persisting them and supports disconnecting saved overrides', async () => {
+    await expect(service.test(owner, 'serpapi', { apiKey: 'serp-secret-key-value' })).rejects
+      .toMatchObject({ code: 'INTEGRATION_NOT_FOUND' })
     const result = await service.test(owner, 'telegram', {
       botToken: '123456789:abcdefghijklmnopqrstuvwxyz_123456',
     })
     expect(result).toEqual({ provider: 'telegram', accountName: '@StoreBot', tested: true })
     expect(db.prepare('SELECT COUNT(*) AS count FROM integration_credentials').get().count).toBe(0)
 
-    await service.save(owner, 'serpapi', { apiKey: 'serp-secret-key-value' })
-    const status = service.remove(owner, 'serpapi')
-    expect(status.providers.serpapi).toMatchObject({ configured: false, source: 'server' })
+    expect(service.status(owner).providers).not.toHaveProperty('serpapi')
+  })
+
+  it('updates the saved Gemini model without exposing or replacing its API key', async () => {
+    await service.save(owner, 'gemini', {
+      apiKey: 'gemini-secret-key-value',
+      model: 'gemini-2.5-flash',
+    })
+
+    const updated = await service.save(owner, 'gemini', {
+      apiKey: '',
+      model: 'gemini-3.8-flash',
+    })
+
+    expect(updated.status.providers.gemini.model).toBe('gemini-3.8-flash')
+    expect(service.credentialsFor(owner, 'gemini')).toEqual({
+      apiKey: 'gemini-secret-key-value',
+      model: 'gemini-3.8-flash',
+    })
+    expect(JSON.stringify(updated)).not.toContain('gemini-secret-key-value')
   })
 
   it('tests and stores credentials for Shopee, Lazada, and TikTok Shop', async () => {

@@ -56,8 +56,7 @@ describe('Integration settings', () => {
       canSaveCredentials: true,
       encryptionKeyConfigured: true,
       providers: {
-        gemini: { configured: true, source: 'server', model: 'gemini-2.5-flash' },
-        serpapi: { configured: true, source: 'server' },
+        gemini: { configured: true, source: 'server', model: 'gemini-3.8-flash' },
         telegram: { configured: true, source: 'workspace' },
         shopee: { configured: false, source: 'server' },
         lazada: { configured: false, source: 'server' },
@@ -78,8 +77,9 @@ describe('Integration settings', () => {
     renderPanel()
 
     expect(await screen.findByText('@StoreBot')).toBeInTheDocument()
-    expect(screen.getAllByText('Configured')).toHaveLength(2)
-    expect(screen.getByText('gemini-2.5-flash')).toBeInTheDocument()
+    expect(screen.getByText('Configured')).toBeInTheDocument()
+    expect(screen.queryByText('SerpAPI')).not.toBeInTheDocument()
+    expect(screen.getByText('gemini-3.8-flash')).toBeInTheDocument()
     expect(screen.getAllByText('Connector not implemented').length).toBeGreaterThan(0)
     expect(screen.getByText('GEMINI_API_KEY')).toBeInTheDocument()
     expect(screen.getByText(/never revealed or stored in the browser/i)).toBeInTheDocument()
@@ -95,8 +95,7 @@ describe('Integration settings', () => {
       canSaveCredentials: true,
       encryptionKeyConfigured: true,
       providers: {
-        gemini: { configured: true, source: 'workspace' as const, model: 'gemini-2.5-flash' },
-        serpapi: { configured: false, source: 'server' as const },
+        gemini: { configured: true, source: 'workspace' as const, model: 'gemini-3.8-flash' },
         telegram: { configured: false, source: 'server' as const },
         shopee: { configured: false, source: 'server' as const },
         lazada: { configured: false, source: 'server' as const },
@@ -121,15 +120,52 @@ describe('Integration settings', () => {
 
     expect(integrationSettingsService.test).toHaveBeenCalledWith('gemini', {
       apiKey: 'test-gemini-secret-key',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
     })
 
     await user.click(screen.getAllByRole('button', { name: 'Save configuration' })[0])
     expect(integrationSettingsService.save).toHaveBeenCalledWith('gemini', {
       apiKey: 'test-gemini-secret-key',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
     })
     expect(keyInput).toHaveValue('')
+  })
+
+  it('updates the saved Gemini model without requiring the hidden API key', async () => {
+    const user = userEvent.setup()
+    const status = {
+      canSaveCredentials: true,
+      encryptionKeyConfigured: true,
+      providers: {
+        gemini: { configured: true, source: 'workspace' as const, model: 'gemini-2.5-flash' },
+        telegram: { configured: false, source: 'server' as const },
+        shopee: { configured: false, source: 'server' as const },
+        lazada: { configured: false, source: 'server' as const },
+        tiktokshop: { configured: false, source: 'server' as const },
+      },
+    }
+    vi.mocked(integrationSettingsService.status).mockResolvedValue(status)
+    vi.mocked(integrationSettingsService.save).mockResolvedValue({
+      accountName: 'Google Gemini',
+      status: {
+        ...status,
+        providers: {
+          ...status.providers,
+          gemini: { configured: true, source: 'workspace', model: 'gemini-3.8-flash' },
+        },
+      },
+    })
+    vi.mocked(inboxService.listConnections).mockResolvedValue([])
+
+    renderPanel()
+    await user.clear(await screen.findByLabelText('Gemini model'))
+    await user.type(screen.getByLabelText('Gemini model'), 'gemini-3.8-flash')
+    await user.click(screen.getAllByRole('button', { name: 'Save configuration' })[0])
+
+    expect(integrationSettingsService.save).toHaveBeenCalledWith('gemini', {
+      apiKey: '',
+      model: 'gemini-3.8-flash',
+    })
   })
 
   it('tests and saves seller API credentials for a marketplace', async () => {
@@ -138,8 +174,7 @@ describe('Integration settings', () => {
       canSaveCredentials: true,
       encryptionKeyConfigured: true,
       providers: {
-        gemini: { configured: false, source: 'server' as const, model: 'gemini-2.5-flash' },
-        serpapi: { configured: false, source: 'server' as const },
+        gemini: { configured: false, source: 'server' as const, model: 'gemini-3.8-flash' },
         telegram: { configured: false, source: 'server' as const },
         shopee: { configured: true, source: 'workspace' as const, accountName: 'Smart Store' },
         lazada: { configured: false, source: 'server' as const },
@@ -180,8 +215,7 @@ describe('Integration settings', () => {
       canSaveCredentials: false,
       encryptionKeyConfigured: false,
       providers: {
-        gemini: { configured: false, source: 'server', model: 'gemini-2.5-flash' },
-        serpapi: { configured: false, source: 'server' },
+        gemini: { configured: false, source: 'server', model: 'gemini-3.8-flash' },
         telegram: { configured: false, source: 'server' },
         shopee: { configured: false, source: 'server' },
         lazada: { configured: false, source: 'server' },

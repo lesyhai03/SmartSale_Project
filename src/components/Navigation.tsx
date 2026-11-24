@@ -6,6 +6,7 @@ import {
   ClipboardList,
   ChevronRight,
   CircleHelp,
+  Calculator,
   Headphones,
   Inbox,
   LayoutDashboard,
@@ -54,6 +55,7 @@ const moduleLinks: { name: string; path: string; icon: LucideIcon }[] = [
   { name: 'Inventory', path: '/inventory', icon: Warehouse },
   { name: 'Market Intelligence', path: '/market-intelligence', icon: TrendingUp },
   { name: 'Reports', path: '/reports', icon: BarChart3 },
+  { name: 'Accounting', path: '/accounting', icon: Calculator },
   { name: 'Admin', path: '/admin', icon: ShieldCheck },
 ]
 
@@ -91,18 +93,23 @@ export function MainSidebar({
   onHelp,
   activeModule = 'Inbox',
   adminMode = false,
+  topbarNavigation = false,
 }: {
   onModule: (module: string) => void
   onHelp: () => void
   mode: 'demo' | 'live'
   activeModule?: string
   adminMode?: boolean
+  topbarNavigation?: boolean
 }) {
   const { t, label } = useI18n()
   const access = useAppAccess()
   const { pathname } = useLocation()
   const visibleModules = moduleLinks.filter(
-    ({ name }) => canAccessModule(name, access) && (!adminMode || name === 'Admin'),
+    ({ name }) =>
+      canAccessModule(name, access) &&
+      (!adminMode || name === 'Admin') &&
+      (!topbarNavigation || adminMode || !['Admin', 'Reports'].includes(name)),
   )
   return (
     <nav className="main-sidebar" aria-label={t('Điều hướng chính', 'Main navigation')}>

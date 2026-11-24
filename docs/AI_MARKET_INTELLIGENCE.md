@@ -1,10 +1,10 @@
 # Thiết kế phân hệ Phân tích thị trường bằng AI
 
-Trạng thái: **ĐÃ TRIỂN KHAI MVP – CHƯA NGHIỆM THU GIAI ĐOẠN 2**. MVP chạy nghiên cứu theo yêu cầu bằng SerpAPI + Google Gemini khi máy chủ đã có khóa; các yêu cầu kiểm thử provider thật, usage/quota, lịch tự động và các tiêu chí đầy đủ bên dưới vẫn còn.
+Trạng thái: **ĐÃ TRIỂN KHAI MVP – CHƯA NGHIỆM THU GIAI ĐOẠN 2**. MVP chạy nghiên cứu theo yêu cầu bằng Google Gemini với Google Search grounding khi máy chủ đã có khóa; các yêu cầu kiểm thử provider thật, usage/quota, lịch tự động và các tiêu chí đầy đủ bên dưới vẫn còn.
 
 ## 1. Hiện trạng và mục tiêu
 
-`/market-intelligence` là module riêng dành cho owner/admin, có đường dẫn trong menu quản trị và menu phân hệ. Trang cho phép nhập ngành, thị trường và câu hỏi; SerpAPI tìm nguồn công khai, Gemini phân tích tiêu đề/trích đoạn, lưu lịch sử theo tenant và trả về nhận định có nguồn dẫn. Không tải tùy ý nội dung URL nguồn; kết quả tìm kiếm là trích đoạn nên độ bao phủ có giới hạn.
+`/market-intelligence` là module riêng dành cho owner/admin, có đường dẫn trong menu quản trị và menu phân hệ. Trang cho phép nhập ngành, thị trường và câu hỏi; Gemini tự tìm kiếm thông tin web công khai, tổng hợp và lưu lịch sử theo tenant. Giao diện chỉ trả về một bản phân tích ngắn, không liệt kê bài viết. Nguồn grounding được giữ nội bộ trong dữ liệu lần chạy; độ bao phủ phụ thuộc kết quả tìm kiếm của Google.
 
 `src/components/AIConversationSummary.tsx` hiện là gợi ý theo quy tắc trong Demo và thông báo chưa kết nối ở Live. Không dùng thành phần này như bằng chứng đã có AI/search thật.
 
@@ -123,8 +123,8 @@ Nghiệm thu khi các ca trên có unit/integration test, thử thật một pro
 
 ## 7. Kết quả hiện tại và phần chưa hoàn thành
 
-MVP có migration lưu run/nguồn/kết quả tenant-scoped, endpoint có kiểm tra admin, adapter SerpAPI và Gemini, giao diện đặt câu hỏi/lịch sử/báo cáo/nguồn dẫn, kiểm tra mã nguồn dẫn và khóa idempotency. Cấu hình cục bộ dùng `SERPAPI_API_KEY`, `GEMINI_API_KEY` và tùy chọn `GEMINI_MODEL`; chạy `npm run server:inventory` để nạp `.env`. Khóa chỉ được đọc ở Node API, không dùng `VITE_*` và không trả về trình duyệt.
+MVP có migration lưu run/grounding metadata/kết quả tenant-scoped, endpoint có kiểm tra admin, Gemini Google Search grounding, giao diện đặt câu hỏi/lịch sử/bản phân tích tóm tắt và khóa idempotency. Cấu hình cục bộ dùng `GEMINI_API_KEY` và tùy chọn `GEMINI_MODEL`; chạy `npm run server:inventory` để nạp `.env`. Khóa chỉ được đọc ở Node API, không dùng `VITE_*` và không trả về trình duyệt.
 
-Mỗi lượt chỉ gửi chủ đề/câu hỏi và tối đa 8 tiêu đề/trích đoạn công khai tới Gemini; không gửi hồ sơ khách hàng. AI chỉ được phép gắn nhận định với ID nguồn có trong lượt chạy. Giao diện phân biệt nhận định có nguồn với suy luận, hiển thị nguồn và giới hạn. Đây không phải dữ liệu thị trường đã kiểm toán; người dùng cần mở và xác minh nguồn trước khi quyết định.
+Mỗi lượt gửi chủ đề/câu hỏi tới Gemini; Google Search grounding hỗ trợ tìm kiếm thông tin công khai. Không gửi hồ sơ khách hàng. Giao diện chỉ hiển thị bản phân tích tóm tắt; nguồn grounding không được trả thành danh sách bài viết cho trình duyệt. Đây không phải dữ liệu thị trường đã kiểm toán; cần xác minh kết luận trước khi ra quyết định.
 
 Chưa có cấu hình provider theo từng tenant trong UI, thu thập/trích xuất toàn trang, kiểm chứng chéo tính độc lập nguồn, xác minh ngữ nghĩa mọi con số, usage/cost ledger, ngân sách/quota, worker, hủy/retry quản trị, lịch tự động, prompt management hoặc thử nghiệm provider thật trong môi trường triển khai. Không coi MVP là hoàn tất toàn bộ Giai đoạn 2; cần cấu hình khóa hợp lệ và nghiệm thu các ca trong mục 6.

@@ -32,6 +32,9 @@ export const DEMO_ACCESS: AppAccess = {
     'document.transfer_receive',
     'reservation.create',
     'reservation.release',
+    'purchaseRequest.create',
+    'purchaseRequest.read',
+    'purchaseRequest.manage',
     'purchaseOrder.create',
     'purchaseOrder.approve',
     'purchaseOrder.cancel',
@@ -48,6 +51,8 @@ export const DEMO_ACCESS: AppAccess = {
     'salesOrder.cancel',
     'salesOrder.fulfill',
     'salesOrder.return',
+    'accounting.read',
+    'accounting.post',
   ],
 }
 
@@ -69,6 +74,9 @@ const inventoryPermissions = [
   'document.transfer_receive',
   'reservation.create',
   'reservation.release',
+  'purchaseRequest.create',
+  'purchaseRequest.read',
+  'purchaseRequest.manage',
   'purchaseOrder.create',
   'purchaseOrder.approve',
   'purchaseOrder.cancel',
@@ -107,12 +115,14 @@ const moduleRules: Record<string, { all?: string[]; any?: string[]; admin?: bool
     ],
   },
   'Market Intelligence': { all: ['operations.read', 'inbox.read'], admin: true },
-  Reports: { all: ['operations.read', 'inbox.read'], admin: true },
+  Reports: { all: ['operations.read', 'inbox.read', 'accounting.read'] },
+  Accounting: { any: ['accounting.read', 'purchaseOrder.approve'] },
 }
 
 export const isAdministrator = (access: AppAccess) => ['owner', 'admin'].includes(access.role)
 
 export function canAccessModule(name: string, access: AppAccess) {
+  if (name === 'Inventory' && access.role === 'accountant') return false
   const rule = moduleRules[name]
   if (!rule) return false
   if (rule.admin && !isAdministrator(access)) return false
@@ -124,18 +134,21 @@ export function canAccessModule(name: string, access: AppAccess) {
 }
 
 export function getDefaultRoute(access: AppAccess) {
-  const destinations = isAdministrator(access)
-    ? ['Dashboard', 'Admin', 'Inbox', 'CRM', 'Customer Care', 'Orders', 'Logistics', 'Inventory']
-    : [
-        'Inbox',
-        'Dashboard',
-        'CRM',
-        'Customer Care',
-        'Orders',
-        'Logistics',
-        'Products',
-        'Inventory',
-      ]
+  const destinations =
+    access.role === 'accountant'
+      ? ['Accounting']
+      : isAdministrator(access)
+        ? ['Dashboard', 'Admin', 'Inbox', 'CRM', 'Customer Care', 'Orders', 'Logistics', 'Inventory']
+        : [
+            'Inbox',
+            'Dashboard',
+            'CRM',
+            'Customer Care',
+            'Orders',
+            'Logistics',
+            'Products',
+            'Inventory',
+          ]
   const routes: Record<string, string> = {
     Admin: '/admin',
     Inbox: '/inbox',
@@ -146,6 +159,7 @@ export function getDefaultRoute(access: AppAccess) {
     Logistics: '/logistics',
     Products: '/products',
     Inventory: '/inventory',
+    Accounting: '/accounting',
   }
   const destination = destinations.find((name) => canAccessModule(name, access))
   return destination ? routes[destination] : '/access-denied'

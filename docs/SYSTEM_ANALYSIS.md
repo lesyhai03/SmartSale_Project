@@ -8,7 +8,7 @@ Ngày khảo sát ban đầu: 17/11/2026; đối chiếu lại 18/11/2026. Phạ
 - Inbox, CRM, chăm sóc, đơn hàng cũ, vận chuyển, dashboard đang hoạt động qua Demo adapter. HTTP adapter của các phân hệ này vẫn chỉ là client/hợp đồng. Kho có backend Node/SQLite riêng, authentication server, RBAC, tenant scope và migrations 001–006.
 - `src/modules/operations/types.ts` có `Product.stock` nguyên không âm. Xác nhận đơn trừ stock; hủy/hoàn cộng lại. Đây là tồn khả dụng của Demo, không phải sổ tồn thực tế.
 - `smartsales.operations.demo.v1` và Inbox là hai vùng localStorage khác nhau, không có giao dịch liên vùng hoặc đảm bảo nhiều người dùng.
-- `/products` là giao diện danh mục SKU cơ bản nối API kho; chưa phải catalog sản phẩm độc lập. `/market-intelligence` có MVP tìm nguồn SerpAPI và phân tích Gemini, còn `/reports` vẫn là trang trạng thái. Market AI chỉ chạy khi cấu hình khóa ở máy chủ và chưa được nghiệm thu provider thật. Catalog Demo gồm sáu sản phẩm gốm/trang trí, không phải Lumi. Catalog báo giá kho đọc SKU thực tế, không fallback Demo.
+- `/products` là giao diện danh mục SKU cơ bản nối API kho; chưa phải catalog sản phẩm độc lập. `/market-intelligence` có MVP dùng Gemini Google Search grounding và trả về phân tích tóm tắt, còn `/reports` vẫn là trang trạng thái. Market AI chỉ chạy khi cấu hình khóa ở máy chủ và chưa được nghiệm thu provider thật. Catalog Demo gồm sáu sản phẩm gốm/trang trí, không phải Lumi. Catalog báo giá kho đọc SKU thực tế, không fallback Demo.
 - Kho đã có ledger, PO nhận từng phần, đơn bán giữ/xuất/trả trong transaction và UI sửa master/config. Chưa tự chuyển dữ liệu localStorage cũ sang kho. Không tìm thấy metadata Git trong workspace khảo sát.
 
 ## Thành phần tái sử dụng

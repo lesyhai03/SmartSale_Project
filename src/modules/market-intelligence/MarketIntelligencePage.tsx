@@ -2,11 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   AlertTriangle,
-  ArrowUpRight,
   BrainCircuit,
   CheckCircle2,
   Clock3,
-  ExternalLink,
   Globe2,
   LoaderCircle,
   Search,
@@ -17,11 +15,11 @@ import { useI18n } from '../../i18n'
 import { APP_MODE } from '../../services/inboxService'
 import { ModulePageHeader } from '../operations/ui'
 import { marketIntelligenceService } from './service'
-import type { MarketProviderStatus, MarketResearchRun, MarketResearchSource } from './service'
+import type { MarketProviderStatus, MarketResearchRun } from './service'
 import './market-intelligence.css'
 
 const initialQuestion =
-  'Phân tích xu hướng nhu cầu, nhóm sản phẩm nổi bật, đối thủ và cơ hội trong 12 tháng gần đây. Dẫn nguồn và nêu rõ nội dung chưa kiểm chứng.'
+  'Phân tích ngắn xu hướng nhu cầu, đối thủ, cơ hội và rủi ro trong 12 tháng gần đây.'
 
 const formatDate = (value: string, locale: string) =>
   new Date(value).toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-GB', {
@@ -29,45 +27,45 @@ const formatDate = (value: string, locale: string) =>
     timeStyle: 'short',
   })
 
-function SourceReferences({ ids, sources }: { ids: string[]; sources: MarketResearchSource[] }) {
-  const { t } = useI18n()
-  const sourceById = new Map(sources.map((source) => [source.id, source]))
-  const references = ids
-    .map((id) => sourceById.get(id))
-    .filter((source): source is MarketResearchSource => Boolean(source))
-  if (!references.length) return null
-  return (
-    <div className="market-source-references" aria-label={t('Nguồn tham khảo', 'References')}>
-      {references.map((source) => (
-        <a key={source.id} href={source.url} target="_blank" rel="noreferrer" title={source.title}>
-          {source.id} <ArrowUpRight size={12} aria-hidden="true" />
-        </a>
-      ))}
-    </div>
-  )
-}
-
-function SourceCard({ source }: { source: MarketResearchSource }) {
-  const { t } = useI18n()
-  return (
-    <article className="market-source">
-      <div className="market-source-heading">
-        <span>{source.id}</span>
-        <a href={source.url} target="_blank" rel="noreferrer">
-          {t('Mở nguồn', 'Open source')} <ExternalLink size={13} aria-hidden="true" />
-        </a>
-      </div>
-      <h3>
-        <a href={source.url} target="_blank" rel="noreferrer">
-          {source.title}
-        </a>
-      </h3>
-      <p className="market-source-meta">
-        {[source.publisher, source.publishedAt].filter(Boolean).join(' · ') ||
-          t('Ngày xuất bản chưa rõ', 'Publication date unavailable')}
-      </p>
-      {source.excerpt && <p className="market-source-excerpt">{source.excerpt}</p>}
-    </article>
+const researchFailureMessage = (code: string | null, t: (vi: string, en: string) => string) => {
+  const messages: Record<string, [string, string]> = {
+    MARKET_AI_FAILED: [
+      'Gemini từ chối yêu cầu. Model gemini-2.5-flash hiện bị giới hạn với một số tài khoản; hãy đổi sang gemini-3.8-flash trong Cài đặt. Nếu vẫn lỗi, kiểm tra API key và quota.',
+      'Gemini rejected the request. gemini-2.5-flash is restricted for some accounts; change it to gemini-3.8-flash in Settings. If it still fails, check the API key and quota.',
+    ],
+    MARKET_AI_MODEL_NOT_FOUND: [
+      'Model Gemini không khả dụng. Vào Cài đặt, đổi model thành gemini-3.8-flash rồi lưu.',
+      'The selected Gemini model is unavailable. In Settings, change it to gemini-3.8-flash and save.',
+    ],
+    MARKET_AI_AUTH_FAILED: [
+      'Gemini từ chối API key hoặc quyền truy cập. Hãy kiểm tra khóa và quyền dùng Google Search grounding.',
+      'Gemini rejected the API key or access. Check the key and Google Search grounding permissions.',
+    ],
+    MARKET_AI_QUOTA_EXCEEDED: [
+      'Gemini đã hết quota hoặc giới hạn tốc độ. Hãy kiểm tra quota API rồi thử lại.',
+      'Gemini quota or rate limit was reached. Check the API quota and try again.',
+    ],
+    MARKET_AI_BAD_REQUEST: [
+      'Gemini từ chối cấu hình yêu cầu. Hãy kiểm tra model đang chọn có hỗ trợ Google Search grounding.',
+      'Gemini rejected the request configuration. Check that the selected model supports Google Search grounding.',
+    ],
+    MARKET_AI_TIMEOUT: [
+      'Gemini phản hồi quá thời gian. Hãy thử lại sau.',
+      'Gemini timed out. Please try again later.',
+    ],
+    MARKET_AI_CONNECTION_FAILED: [
+      'Máy chủ không kết nối được Gemini. Hãy kiểm tra mạng máy chủ.',
+      'The server could not connect to Gemini. Check the server network.',
+    ],
+    MARKET_AI_UNAVAILABLE: [
+      'Gemini tạm thời không xử lý được yêu cầu. Hãy thử lại sau.',
+      'Gemini is temporarily unavailable. Please try again later.',
+    ],
+  }
+  const message = code ? messages[code] : undefined
+  return message ? t(message[0], message[1]) : t(
+    'Lần nghiên cứu này không hoàn tất. Hãy kiểm tra cấu hình và thử lại.',
+    'This research run did not complete. Check configuration and try again.',
   )
 }
 
@@ -193,8 +191,8 @@ export default function MarketIntelligencePage() {
         eyebrow="SMARTSALES / MARKET INTELLIGENCE"
         title={t('Phân tích thị trường bằng AI', 'AI market intelligence')}
         description={t(
-          'Tìm nguồn công khai bằng SerpAPI và dùng Gemini tổng hợp nhận định có dẫn chứng.',
-          'Search public sources with SerpAPI and use Gemini to produce cited findings.',
+          'Gemini tự tìm kiếm thông tin công khai trên web và trả về bản phân tích ngắn gọn.',
+          'Gemini searches public web information and returns a concise analysis.',
         )}
       />
 
@@ -223,33 +221,29 @@ export default function MarketIntelligencePage() {
                   <p>
                     {status.ready
                       ? t(
-                          'Nhà cung cấp đã sẵn sàng. Báo cáo chỉ chạy khi bạn gửi yêu cầu.',
-                          'Providers are ready. Research runs only when you submit a request.',
+                          'Gemini đã sẵn sàng tìm kiếm web và phân tích khi bạn gửi yêu cầu.',
+                          'Gemini is ready to search the web and analyze when you submit a request.',
                         )
                       : t(
-                          'Thiếu cấu hình máy chủ. Thêm khóa vào .env rồi khởi động lại API.',
-                          'Server configuration is missing. Add the keys to .env and restart the API.',
+                          'Thiếu cấu hình Gemini. Thêm khóa vào .env rồi khởi động lại API.',
+                          'Gemini configuration is missing. Add its key to .env and restart the API.',
                         )}
                   </p>
                 </div>
               </div>
               <div className="market-provider-list">
                 <div>
-                  <span>{t('Tìm kiếm web', 'Web search')}</span>
-                  <strong>{status.providers.search.name}</strong>
-                  {providerState(status.providers.search.configured)}
-                </div>
-                <div>
-                  <span>{t('Phân tích', 'Analysis')}</span>
                   <strong>
-                    {status.providers.analysis.name} · {status.providers.analysis.model}
+                    {t('Tìm kiếm web & phân tích', 'Web search & analysis')}
                   </strong>
-                  {providerState(status.providers.analysis.configured)}
+                  <small>
+                    {status.provider.name} · {status.provider.model}
+                  </small>
+                  {providerState(status.provider.configured)}
                 </div>
               </div>
               {!status.ready && (
                 <p className="market-env-hint">
-                  <code>SERPAPI_API_KEY</code>
                   <code>GEMINI_API_KEY</code>
                 </p>
               )}
@@ -310,8 +304,8 @@ export default function MarketIntelligencePage() {
                   <ShieldCheck size={15} aria-hidden="true" />
                   <span>
                     {t(
-                      'Chỉ gửi câu hỏi và trích đoạn nguồn công khai tới AI. Không nhập dữ liệu khách hàng hoặc bí mật doanh nghiệp.',
-                      'Only the question and public-source excerpts are sent to AI. Do not enter customer data or business secrets.',
+                      'Ngành hàng, khu vực và câu hỏi được gửi tới Gemini để tìm kiếm web và phân tích. Không nhập dữ liệu khách hàng hoặc bí mật doanh nghiệp.',
+                      'The industry, region, and question are sent to Gemini for web search and analysis. Do not enter customer data or business secrets.',
                     )}
                   </span>
                 </div>
@@ -326,7 +320,7 @@ export default function MarketIntelligencePage() {
                     <Sparkles size={16} aria-hidden="true" />
                   )}
                   {running
-                    ? t('Đang tìm nguồn và phân tích…', 'Searching and analyzing…')
+                    ? t('Gemini đang tìm trên web và phân tích…', 'Gemini is searching the web and analyzing…')
                     : t('Phân tích thị trường', 'Analyze market')}
                 </button>
               </form>
@@ -418,10 +412,7 @@ export default function MarketIntelligencePage() {
                           'Không tìm thấy nguồn phù hợp. Hãy thử câu hỏi hoặc khu vực khác.',
                           'No suitable sources were found. Try a different question or region.',
                         )
-                      : t(
-                          'Lần nghiên cứu này không hoàn tất. Hãy kiểm tra cấu hình và thử lại.',
-                          'This research run did not complete. Check configuration and try again.',
-                        )}
+                      : researchFailureMessage(selectedRun.errorCode, t)}
                   </p>
                 </div>
               )}
@@ -431,92 +422,12 @@ export default function MarketIntelligencePage() {
                     <CheckCircle2 size={21} aria-hidden="true" />
                     <div>
                       <h3 id="market-summary-title">
-                        {t('Tổng kết điều hành', 'Executive summary')}
+                        {t('Phân tích tóm tắt', 'Concise analysis')}
                       </h3>
-                      <p>{selectedRun.analysis.summary.text}</p>
-                      <SourceReferences
-                        ids={selectedRun.analysis.summary.sourceIds}
-                        sources={selectedRun.sources}
-                      />
+                      <p>{selectedRun.analysis}</p>
                     </div>
                   </section>
-                  <div className="market-report-grid">
-                    <section className="market-report-section">
-                      <h3>{t('Nhận định', 'Findings')}</h3>
-                      <div className="market-insights">
-                        {selectedRun.analysis.insights.map((insight, index) => (
-                          <article className="market-insight" key={`${insight.title}-${index}`}>
-                            <div className="market-insight-heading">
-                              <span className={`market-evidence-tag ${insight.kind}`}>
-                                {insight.kind === 'evidence'
-                                  ? t('Có nguồn dẫn', 'Source-backed')
-                                  : t('Suy luận AI', 'AI inference')}
-                              </span>
-                              <SourceReferences
-                                ids={insight.sourceIds}
-                                sources={selectedRun.sources}
-                              />
-                            </div>
-                            <h4>{insight.title}</h4>
-                            <p>{insight.detail}</p>
-                          </article>
-                        ))}
-                      </div>
-                    </section>
-                    <section className="market-report-section">
-                      <h3>{t('Đề xuất hành động', 'Recommended actions')}</h3>
-                      <div className="market-insights">
-                        {selectedRun.analysis.recommendations.map((item, index) => (
-                          <article className="market-insight" key={`${item.action}-${index}`}>
-                            <div className="market-insight-heading">
-                              <span className="market-evidence-tag recommendation">
-                                {t('Đề xuất', 'Recommendation')}
-                              </span>
-                              <SourceReferences
-                                ids={item.sourceIds}
-                                sources={selectedRun.sources}
-                              />
-                            </div>
-                            <h4>{item.action}</h4>
-                            <p>{item.reason}</p>
-                          </article>
-                        ))}
-                      </div>
-                    </section>
-                  </div>
-                  {selectedRun.analysis.limitations.length > 0 && (
-                    <div className="market-limitations">
-                      <AlertTriangle size={16} aria-hidden="true" />
-                      <div>
-                        <strong>{t('Giới hạn dữ liệu', 'Data limitations')}</strong>
-                        <ul>
-                          {selectedRun.analysis.limitations.map((item) => (
-                            <li key={item}>{item}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  )}
                 </>
-              )}
-              {selectedRun.sources.length > 0 && (
-                <section className="market-sources-section">
-                  <h3>
-                    <Globe2 size={17} aria-hidden="true" />
-                    {t('Nguồn tham khảo', 'Sources')} ({selectedRun.sources.length})
-                  </h3>
-                  <div className="market-sources-grid">
-                    {selectedRun.sources.map((source) => (
-                      <SourceCard key={source.id} source={source} />
-                    ))}
-                  </div>
-                  <p className="market-source-disclaimer">
-                    {t(
-                      'Kết quả tìm kiếm là trích đoạn công khai, không đảm bảo đầy đủ hoặc độc lập. Hãy mở nguồn và tự xác minh trước khi ra quyết định.',
-                      'Search results are public excerpts and may be incomplete or non-independent. Open and verify sources before making decisions.',
-                    )}
-                  </p>
-                </section>
               )}
               <p className="market-report-meta">
                 {t('Mô hình', 'Model')}: {selectedRun.model} ·{' '}

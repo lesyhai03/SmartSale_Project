@@ -198,6 +198,13 @@ describe('Global business accounts and tenant permissions', () => {
         })
       ).status,
     ).toBe(404)
+    expect(
+      (
+        await request(`/auth/users/${create.body.user.id}/activity`, {
+          cookie: b.cookie,
+        })
+      ).status,
+    ).toBe(404)
     expect((await request('/auth/me?tenantId=other', { cookie: a.cookie })).status).toBe(400)
     expect(
       (await request('/inventory/snapshot?tenantId=other', { cookie: viewer.cookie })).status,
@@ -277,13 +284,35 @@ describe('Global business accounts and tenant permissions', () => {
       expect.arrayContaining([
         'sku.create',
         'sku.update',
-        'document.create',
-        'document.approve',
-        'document.post',
-        'purchaseOrder.receive',
+        'document.transfer_receive',
       ]),
     )
+    expect(snapshot.body.permissions).not.toContain('document.create')
+    expect(snapshot.body.permissions).not.toContain('document.approve')
+    expect(snapshot.body.permissions).not.toContain('document.post')
+    expect(snapshot.body.permissions).not.toContain('purchaseOrder.receive')
     expect(snapshot.body.permissions).not.toContain('config.update')
+  })
+
+  it('gives accountants purchase approval without order creation or receiving rights', async () => {
+    const owner = await register()
+    const created = await request('/auth/users', {
+      method: 'POST',
+      cookie: owner.cookie,
+      body: {
+        name: 'Kế toán',
+        email: 'accountant@example.com',
+        password: registration().password,
+        role: 'accountant',
+      },
+    })
+    expect(created.status).toBe(201)
+    const signedIn = await login('accountant@example.com')
+    const snapshot = await request('/inventory/snapshot', { cookie: signedIn.cookie })
+    expect(snapshot.body.permissions).toContain('purchaseOrder.approve')
+    expect(snapshot.body.permissions).not.toContain('purchaseOrder.create')
+    expect(snapshot.body.permissions).not.toContain('purchaseOrder.receive')
+    expect(snapshot.body.purchaseRequests).toEqual([])
   })
 
   it('prevents admins from granting admin or owner privileges while allowing lower roles', async () => {
@@ -300,6 +329,19 @@ describe('Global business accounts and tenant permissions', () => {
     })
     expect(admin.status).toBe(201)
     const session = await login('admin@example.com')
+    expect(session.body.permissions).toEqual(
+      expect.arrayContaining(['account.users.manage', 'operations.read', 'inbox.read']),
+    )
+    for (const permission of [
+      'customers.manage',
+      'crm.manage',
+      'orders.manage',
+      'logistics.manage',
+      'care.manage',
+      'sku.create',
+      'document.post',
+    ])
+      expect(session.body.permissions).not.toContain(permission)
     for (const role of ['admin', 'owner'])
       expect(
         (
@@ -357,6 +399,40 @@ describe('Global business accounts and tenant permissions', () => {
     expect(oldSession.status).toBe(200)
     expect(await login('employee@example.com', 'incorrect-password')).toMatchObject({ status: 401 })
 
+    db.prepare(
+      'INSERT INTO audit_events(id,tenant_id,actor_id,action,entity_id,details_json,created_at) VALUES(?,?,?,?,?,?,?)',
+    ).run(
+      'employee-action-1',
+      owner.body.tenant.id,
+      employee.body.user.id,
+      'order.created',
+      'order-1',
+      JSON.stringify({ description: 'Tạo đơn bán SO-1.' }),
+      timestamp,
+    )
+    const activity = await request(`/auth/users/${employee.body.user.id}/activity`, {
+      cookie: owner.cookie,
+    })
+    expect(activity.status).toBe(200)
+    expect(activity.body.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: 'login.success', succeeded: true }),
+        expect.objectContaining({ action: 'login.failure', succeeded: false }),
+        expect.objectContaining({
+          action: 'order.created',
+          description: 'Tạo đơn bán SO-1.',
+          succeeded: null,
+        }),
+      ]),
+    )
+    expect(
+      (
+        await request(`/auth/users/${employee.body.user.id}/activity`, {
+          cookie: oldSession.cookie,
+        })
+      ).status,
+    ).toBe(403)
+
     const history = await request('/auth/login-events', { cookie: owner.cookie })
     expect(history.status).toBe(200)
     expect(history.body.events).toEqual(
@@ -373,6 +449,25 @@ describe('Global business accounts and tenant permissions', () => {
     )
     expect(JSON.stringify(history.body)).not.toContain('incorrect-password')
     expect((await request('/auth/login-events', { cookie: oldSession.cookie })).status).toBe(403)
+
+    const listed = await request('/auth/users', { cookie: owner.cookie })
+    const listedEmployee = listed.body.users.find((user) => user.id === employee.body.user.id)
+    expect(listedEmployee).toMatchObject({
+      isOnline: true,
+      lastActivityAt: timestamp,
+    })
+    currentTime = new Date(currentTime.getTime() + 6 * 60 * 1000)
+    const idle = await request('/auth/users', { cookie: owner.cookie })
+    expect(idle.body.users.find((user) => user.id === employee.body.user.id)).toMatchObject({
+      isOnline: false,
+      lastActivityAt: timestamp,
+    })
+    await request('/auth/me', { cookie: oldSession.cookie })
+    const returned = await request('/auth/users', { cookie: owner.cookie })
+    expect(returned.body.users.find((user) => user.id === employee.body.user.id)).toMatchObject({
+      isOnline: true,
+      lastActivityAt: currentTime.toISOString(),
+    })
 
     expect(
       await request(`/auth/users/${employee.body.user.id}/password`, {

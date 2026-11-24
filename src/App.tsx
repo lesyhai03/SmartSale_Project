@@ -50,6 +50,7 @@ import {
   DEMO_ACCESS,
   canAccessModule,
   getDefaultRoute,
+  isAdministrator,
   useAppAccess,
 } from './modules/operations/access'
 import type { AppAccess } from './modules/operations/access'
@@ -64,7 +65,8 @@ const OrdersPage = lazy(() => import('./modules/orders/OrdersPage'))
 const LogisticsPage = lazy(() => import('./modules/logistics/LogisticsPage'))
 const InventoryPage = lazy(() => import('./modules/inventory/InventoryPage'))
 const InventoryAuthPage = lazy(() => import('./modules/inventory/InventoryAuthPage'))
-const PlannedModulePage = lazy(() => import('./modules/roadmap/PlannedModulePage'))
+const ReportsPage = lazy(() => import('./modules/reports/ReportsPage'))
+const AccountantWorkspace = lazy(() => import('./modules/reports/AccountantWorkspace'))
 const MarketIntelligencePage = lazy(
   () => import('./modules/market-intelligence/MarketIntelligencePage'),
 )
@@ -108,7 +110,8 @@ export default function App() {
               <Route path="/inventory" element={<InventoryPage />} />
               <Route path="/products" element={<InventoryPage catalogOnly />} />
               <Route path="/market-intelligence" element={<MarketIntelligencePage />} />
-              <Route path="/reports" element={<PlannedModulePage module="reports" />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/accounting" element={<AccountantWorkspace />} />
             </Route>
             <Route path="/access-denied" element={<AccessDeniedPage />} />
             <Route path="*" element={<DefaultRoute />} />
@@ -436,7 +439,7 @@ function InboxPage() {
   }
   return (
     <div
-      className={`app-shell ${collapsed ? 'sidebar-collapsed' : ''} ${detailsOpen ? 'details-visible' : ''} ${mobileChat ? 'show-mobile-chat' : ''}`}
+      className={`app-shell ${isAdministrator(access) ? 'admin-navigation' : ''} ${collapsed ? 'sidebar-collapsed' : ''} ${detailsOpen ? 'details-visible' : ''} ${mobileChat ? 'show-mobile-chat' : ''}`}
     >
       <MainSidebar onModule={moduleClick} onHelp={() => setModal('help')} mode={mode} />
       <div className="main-area">

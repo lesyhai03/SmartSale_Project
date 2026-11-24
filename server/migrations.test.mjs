@@ -7,6 +7,36 @@ import { describe, expect, it } from 'vitest'
 import { openDatabase } from './database.mjs'
 
 describe('Inventory schema upgrades', () => {
+  it('removes legacy SerpAPI credentials when upgrading', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'integration-upgrade-'))
+    const path = join(directory, 'inventory.sqlite')
+    let db = openDatabase(path)
+    try {
+      db.prepare('INSERT INTO tenants(id,name,created_at) VALUES(?,?,?)').run(
+        'tenant',
+        'Existing company',
+        '2026-01-01T00:00:00Z',
+      )
+      db.prepare(
+        `INSERT INTO integration_credentials(
+          tenant_id,provider,ciphertext,nonce,auth_tag,account_name,created_at,updated_at
+        ) VALUES('tenant','serpapi','ciphertext','nonce','tag','SerpAPI','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+      ).run()
+      db.prepare(
+        "DELETE FROM schema_migrations WHERE version='015_remove_serpapi_credentials.sql'",
+      ).run()
+      db.close()
+      db = openDatabase(path)
+
+      expect(db.prepare('SELECT COUNT(*) AS total FROM integration_credentials').get().total).toBe(
+        0,
+      )
+    } finally {
+      db.close()
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   it('upgrades existing v1 balances and journal without resetting stock or identity', () => {
     const directory = mkdtempSync(join(tmpdir(), 'inventory-upgrade-'))
     const path = join(directory, 'inventory.sqlite')
@@ -75,7 +105,7 @@ describe('Inventory schema upgrades', () => {
         { id: 'priced-sku', price: 150000, price_known: 1 },
         { id: 'sku', price: 0, price_known: 0 },
       ])
-      expect(db.prepare('SELECT COUNT(*) AS total FROM schema_migrations').get().total).toBe(14)
+      expect(db.prepare('SELECT COUNT(*) AS total FROM schema_migrations').get().total).toBe(19)
       expect(
         db
           .prepare('SELECT version FROM schema_migrations ORDER BY version')
@@ -96,11 +126,16 @@ describe('Inventory schema upgrades', () => {
         '012_market_intelligence.sql',
         '013_integration_credentials.sql',
         '014_marketplace_credentials.sql',
+        '015_remove_serpapi_credentials.sql',
+        '016_user_activity.sql',
+        '017_accounting_ledger.sql',
+        '018_stock_restock_requests.sql',
+        '019_accountant_role.sql',
       ])
       expect(
         db
           .prepare(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('purchase_orders','purchase_order_lines','reservation_allocations','sales_orders','sales_order_lines') ORDER BY name",
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('purchase_orders','purchase_order_lines','reservation_allocations','sales_orders','sales_order_lines','stock_restock_requests','stock_restock_request_lines') ORDER BY name",
           )
           .all()
           .map((row) => row.name),
@@ -110,6 +145,8 @@ describe('Inventory schema upgrades', () => {
         'reservation_allocations',
         'sales_order_lines',
         'sales_orders',
+        'stock_restock_request_lines',
+        'stock_restock_requests',
       ])
       expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([])
       expect(() =>

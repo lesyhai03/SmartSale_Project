@@ -31,13 +31,18 @@ import { InventoryApiError, inventoryService } from './service'
 import type {
   InventorySnapshot,
   PurchaseOrder,
+  StockRestockRequest,
   StockBalance,
   StockCount,
   StockDocument,
 } from './types'
 import './inventory.css'
 import InventoryInsights from './InventoryInsights'
-import { PurchaseOrderCreateForm, PurchaseOrderReceiveForm } from './PurchaseOrderForms'
+import {
+  PurchaseOrderCreateForm,
+  PurchaseOrderReceiveForm,
+  RestockRequestCreateForm,
+} from './PurchaseOrderForms'
 import ProductImportForm from './ProductImportForm'
 
 type Tab =
@@ -124,6 +129,9 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
   } | null>(null)
   const [configOpen, setConfigOpen] = useState(false)
   const [purchaseOrderCreateOpen, setPurchaseOrderCreateOpen] = useState(false)
+  const [restockRequestCreateOpen, setRestockRequestCreateOpen] = useState(false)
+  const [restockRequestForOrder, setRestockRequestForOrder] =
+    useState<StockRestockRequest | null>(null)
   const [purchaseOrderReceive, setPurchaseOrderReceive] = useState<PurchaseOrder | null>(null)
   const [productImportOpen, setProductImportOpen] = useState(false)
   const [ledgerLoading, setLedgerLoading] = useState(false)
@@ -146,6 +154,8 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
     setEditRecord(null)
     setConfigOpen(false)
     setPurchaseOrderCreateOpen(false)
+    setRestockRequestCreateOpen(false)
+    setRestockRequestForOrder(null)
     setPurchaseOrderReceive(null)
     setProductImportOpen(false)
     setLedgerLoading(false)
@@ -340,6 +350,13 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
         purchaseOrder.lines.some((line) => skuIds.has(line.skuId)) &&
         inPeriod(purchaseOrder.createdAt),
     ) ?? []
+  const purchaseRequests =
+    data?.purchaseRequests.filter(
+      (request) =>
+        (!warehouseFilter || request.warehouseId === warehouseFilter) &&
+        inPeriod(request.createdAt),
+    ) ?? []
+  const canCreateStandaloneReceipt = ['owner', 'admin'].includes(data?.actor.role ?? '')
   const availableBySku = new Map<string, number>()
   balances.forEach((balance) =>
     availableBySku.set(balance.skuId, (availableBySku.get(balance.skuId) ?? 0) + balance.available),
@@ -358,7 +375,15 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
     [
       'purchaseOrders',
       t('Đơn mua hàng', 'Purchase orders'),
-      ['purchaseOrder.create', 'purchaseOrder.approve', 'purchaseOrder.cancel', 'purchaseOrder.receive'],
+      [
+        'purchaseRequest.create',
+        'purchaseRequest.read',
+        'purchaseRequest.manage',
+        'purchaseOrder.create',
+        'purchaseOrder.approve',
+        'purchaseOrder.cancel',
+        'purchaseOrder.receive',
+      ],
     ],
     [
       'warehouses',
@@ -398,6 +423,7 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
       active: t('Đang giữ', 'Active'),
       released: t('Đã giải phóng', 'Released'),
       open: t('Đang mở', 'Open'),
+      proposed: t('Đã lập đề xuất', 'Proposed'),
       recorded: t('Đã ghi nhận', 'Recorded'),
       completed: t('Hoàn tất', 'Completed'),
       repairing: t('Đang sửa', 'Repairing'),
@@ -815,11 +841,12 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
                     title={t('Tồn theo SKU · kho · vị trí', 'Stock by SKU · warehouse · location')}
                     action={
                       <div className="inv-actions">
-                        {actionButton(
-                          'document',
-                          'document.create',
-                          t('Nhập thêm hàng', 'Receive stock'),
-                        )}
+                        {canCreateStandaloneReceipt &&
+                          actionButton(
+                            'document',
+                            'document.create',
+                            t('Nhập thêm hàng', 'Receive stock'),
+                          )}
                         {actionButton(
                           'document',
                           'document.create',
@@ -829,10 +856,15 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
                     }
                   >
                     <p className="inv-note inv-panel-note">
-                      {t(
-                        'Nhập thêm hàng: chọn “Nhập thêm hàng”, nhập kho, sản phẩm, số lượng và giá vốn để tạo phiếu nháp; sau đó duyệt và ghi sổ để cập nhật tồn. Nhận hàng khách trả theo đơn tại trang Đơn hàng.',
-                        'To receive stock, choose “Receive stock”, enter the warehouse, item, quantity and unit cost to create a draft; then approve and post it to update on-hand stock. Process customer returns from the Orders page.',
-                      )}
+                      {canCreateStandaloneReceipt
+                        ? t(
+                            'Mua hàng bổ sung phải theo đơn mua đã được kế toán duyệt; phiếu nhập độc lập dành cho nghiệp vụ do chủ/quản trị viên xử lý. Nhận hàng khách trả theo đơn tại trang Đơn hàng.',
+                            'Replenishment purchases must use a purchase order approved by accounting; standalone receipts are for owner/administrator-managed operations. Process customer returns from the Orders page.',
+                          )
+                        : t(
+                            'Mua hàng bổ sung: nhân viên bán gửi yêu cầu, quản lý lập đơn mua, kế toán duyệt rồi kho nhận theo đơn. Không tạo phiếu nhập độc lập; nhận hàng khách trả theo đơn tại trang Đơn hàng.',
+                            'For replenishment, sales submits a request, the manager creates a purchase order, accounting approves it, then the warehouse receives against that order. Standalone receipts are unavailable; process customer returns from the Orders page.',
+                          )}
                     </p>
                     <Table
                       columns={[
@@ -1035,16 +1067,31 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
                     'Purchase orders and receiving progress',
                   )}
                   action={
-                    can('purchaseOrder.create') && (
-                      <button
-                        className="button button-secondary"
-                        disabled={busy || loading || !inventoryEnabled}
-                        onClick={() => setPurchaseOrderCreateOpen(true)}
-                      >
-                        <Plus size={14} />
-                        {t('Tạo đơn mua', 'Create purchase order')}
-                      </button>
-                    )
+                    <div className="inv-actions">
+                      {can('purchaseRequest.create') && (
+                        <button
+                          className="button button-secondary"
+                          disabled={busy || loading || !inventoryEnabled}
+                          onClick={() => setRestockRequestCreateOpen(true)}
+                        >
+                          <ClipboardList size={14} />
+                          {t('Tạo yêu cầu nhập hàng', 'Create restock request')}
+                        </button>
+                      )}
+                      {can('purchaseOrder.create') && (
+                        <button
+                          className="button button-secondary"
+                          disabled={busy || loading || !inventoryEnabled}
+                          onClick={() => {
+                            setRestockRequestForOrder(null)
+                            setPurchaseOrderCreateOpen(true)
+                          }}
+                        >
+                          <Plus size={14} />
+                          {t('Tạo đơn mua', 'Create purchase order')}
+                        </button>
+                      )}
+                    </div>
                   }
                 >
                   <p className="inv-note inv-panel-note">
@@ -1053,6 +1100,70 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
                       'Received quantities increase only after the receiving document is posted. Orders can be received in parts; pending receipts are tracked separately to prevent over-receiving.',
                     )}
                   </p>
+                  {can('purchaseRequest.read') && (
+                    <>
+                      <h3>{t('Yêu cầu bổ sung hàng', 'Restock requests')}</h3>
+                      <Table
+                        columns={[
+                          t('Yêu cầu', 'Request'),
+                          t('Kho', 'Warehouse'),
+                          t('Sản phẩm cần bổ sung', 'Requested items'),
+                          t('Trạng thái', 'Status'),
+                          t('Thao tác', 'Actions'),
+                        ]}
+                        empty={!purchaseRequests.length ? empty : undefined}
+                      >
+                        {purchaseRequests.map((request) => (
+                          <tr key={request.id}>
+                            <td>
+                              <strong>{request.number}</strong>
+                              <small>
+                                {request.sourceReference || request.note || t('Không có tham chiếu', 'No reference')}
+                              </small>
+                              <small>{dateTime(request.createdAt, locale)}</small>
+                            </td>
+                            <td>{warehouseName(request.warehouseId)}</td>
+                            <td>
+                              {request.lines.map((line) => (
+                                <div key={line.id}>
+                                  <strong>{skuName(line.skuId)}</strong>
+                                  <small>
+                                    {t('Cần bổ sung', 'Requested')}: {line.requestedQuantity}
+                                  </small>
+                                </div>
+                              ))}
+                            </td>
+                            <td>
+                              <span className={`inv-tag inv-tag-${request.status}`}>
+                                {statusName(request.status)}
+                              </span>
+                              {request.purchaseOrderNumber && (
+                                <small>
+                                  {t('Đơn mua', 'Purchase order')}: {request.purchaseOrderNumber}
+                                </small>
+                              )}
+                            </td>
+                            <td>
+                              {request.status === 'open' &&
+                                can('purchaseRequest.manage') &&
+                                can('purchaseOrder.create') && (
+                                  <button
+                                    className="button button-primary"
+                                    disabled={busy || loading || !inventoryEnabled}
+                                    onClick={() => {
+                                      setRestockRequestForOrder(request)
+                                      setPurchaseOrderCreateOpen(true)
+                                    }}
+                                  >
+                                    {t('Lập đề xuất mua', 'Prepare purchase order')}
+                                  </button>
+                                )}
+                            </td>
+                          </tr>
+                        ))}
+                      </Table>
+                    </>
+                  )}
                   <Table
                     columns={[
                       t('Đơn mua / nhà cung cấp', 'Order / supplier'),
@@ -1690,7 +1801,12 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
             </>
           )}
           {form === 'document' && (
-            <DocumentForm data={data} run={run} onClose={() => setForm(null)} />
+            <DocumentForm
+              data={data}
+              run={run}
+              onClose={() => setForm(null)}
+              canCreateStandaloneReceipt={canCreateStandaloneReceipt}
+            />
           )}
           {form && form !== 'document' && (
             <SetupForm kind={form} data={data} run={run} onClose={() => setForm(null)} />
@@ -1711,8 +1827,19 @@ export default function InventoryPage({ catalogOnly = false }: { catalogOnly?: b
           {purchaseOrderCreateOpen && (
             <PurchaseOrderCreateForm
               data={data}
+              request={restockRequestForOrder ?? undefined}
               run={run}
-              onClose={() => setPurchaseOrderCreateOpen(false)}
+              onClose={() => {
+                setPurchaseOrderCreateOpen(false)
+                setRestockRequestForOrder(null)
+              }}
+            />
+          )}
+          {restockRequestCreateOpen && (
+            <RestockRequestCreateForm
+              data={data}
+              run={run}
+              onClose={() => setRestockRequestCreateOpen(false)}
             />
           )}
           {purchaseOrderReceive && (

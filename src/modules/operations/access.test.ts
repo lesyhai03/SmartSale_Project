@@ -36,4 +36,28 @@ describe('role-based module access', () => {
     expect(canAccessModule('Orders', staff)).toBe(true)
     expect(canAccessModule('Logistics', staff)).toBe(false)
   })
+
+  it('grants accounting reports through explicit read permission, not admin status', () => {
+    const manager = {
+      role: 'manager',
+      permissions: ['operations.read', 'inbox.read', 'accounting.read'],
+    }
+
+    expect(canAccessModule('Reports', manager)).toBe(true)
+    expect(
+      canAccessModule('Reports', { ...manager, permissions: ['operations.read', 'inbox.read'] }),
+    ).toBe(false)
+  })
+
+  it('routes accountants to a separate accounting workspace, not inventory', () => {
+    const accountant = {
+      role: 'accountant',
+      permissions: ['purchaseOrder.approve', 'accounting.read'],
+    }
+
+    expect(canAccessModule('Accounting', accountant)).toBe(true)
+    expect(canAccessModule('Inventory', accountant)).toBe(false)
+    expect(canAccessModule('Reports', accountant)).toBe(false)
+    expect(getDefaultRoute(accountant)).toBe('/accounting')
+  })
 })

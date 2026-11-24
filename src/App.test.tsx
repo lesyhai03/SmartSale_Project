@@ -117,6 +117,7 @@ const inventorySnapshot = (products: Product[] = []): InventorySnapshot => ({
     updatedAt: '2026-11-17T09:00:00Z',
   })),
   documents: [],
+  purchaseRequests: [],
   purchaseOrders: [],
   salesOrders: [],
   ledger: [],
@@ -271,7 +272,7 @@ describe('Omnichannel Inbox integration', () => {
     const quickOrder = workspace().getByRole('button', { name: 'Quick order' })
     expect(quickReplies.parentElement?.nextElementSibling).toBe(ai)
     expect(workspace().queryByText('Demo · rule-based sample analysis')).not.toBeInTheDocument()
-    expect(workspace().queryByText('Analyze purchase intent')).not.toBeInTheDocument()
+    expect(workspace().queryByText('Find products in messages')).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(workspace().getByRole('button', { name: 'Create PDF quotation' })).toBeInTheDocument()
 
@@ -296,7 +297,7 @@ describe('Omnichannel Inbox integration', () => {
     await user.click(quickOrder)
     const salesDialog = within(screen.getByRole('dialog', { name: 'Quick order' }))
     await user.click(await salesDialog.findByRole('button', { name: 'Create order manually' }))
-    await screen.findByRole('dialog', { name: 'Create inventory sales order' })
+    await screen.findByRole('dialog', { name: 'Create order' })
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     await user.keyboard('{Escape}')
     expect(screen.getByRole('dialog', { name: 'Quick order' })).toHaveFocus()
@@ -305,14 +306,14 @@ describe('Omnichannel Inbox integration', () => {
     expect(quickOrder).toHaveFocus()
   })
 
-  it('manages marketplace sources, analyzes a sample customer request and creates a linked draft order', async () => {
+  it('matches customer message keywords without offering restock requests and creates a linked draft order', async () => {
     const inventory = inventorySnapshot([
       {
         id: 'sku-cup',
         sku: 'CUP-001',
         name: 'Cốc gốm màu kem',
         price: 250000,
-        stock: 5,
+        stock: 0,
       },
       {
         id: 'sku-candle',
@@ -380,12 +381,14 @@ describe('Omnichannel Inbox integration', () => {
     )
     await user.click(workspace().getByRole('button', { name: 'Quick order' }))
     const sales = within(screen.getByRole('dialog', { name: 'Quick order' }))
-    await user.click(await sales.findByRole('button', { name: 'Analyze purchase intent' }))
+    await user.click(await sales.findByRole('button', { name: 'Find products in messages' }))
     expect(await sales.findByText('Cốc gốm màu kem')).toBeInTheDocument()
     expect(sales.getByText('Nến thơm Santal')).toBeInTheDocument()
-    await user.click(sales.getByRole('button', { name: 'Fill order from suggestions' }))
+    expect(sales.queryByRole('button', { name: 'Request missing stock' })).not.toBeInTheDocument()
+    const updatedSales = within(screen.getByRole('dialog', { name: 'Quick order' }))
+    await user.click(updatedSales.getByRole('button', { name: 'Fill order from suggestions' }))
     const orderDialog = within(
-      await screen.findByRole('dialog', { name: 'Create inventory sales order' }),
+      await screen.findByRole('dialog', { name: 'Create order' }),
     )
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
     expect(orderDialog.getAllByRole('spinbutton', { name: /Line quantity/ })[0]).toHaveValue(2)
@@ -398,7 +401,7 @@ describe('Omnichannel Inbox integration', () => {
     await user.click(orderDialog.getByRole('button', { name: 'Save draft order' }))
     await waitFor(() =>
       expect(
-        screen.queryByRole('dialog', { name: 'Create inventory sales order' }),
+        screen.queryByRole('dialog', { name: 'Create order' }),
       ).not.toBeInTheDocument(),
     )
     expect(inventoryService.command).toHaveBeenCalledWith(

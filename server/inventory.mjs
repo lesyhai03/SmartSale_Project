@@ -498,6 +498,34 @@ export function createInventory(db) {
     return linked.order_id
   }
 
+  const authorizePurchaseReceipt = (actor, document) => {
+    if (document.type !== 'receipt' || document.return_to_stock) return
+    const receipt = get(
+      'SELECT purchase_order_id FROM purchase_order_receipts WHERE tenant_id=? AND document_id=?',
+      actor.tenantId,
+      document.id,
+    )
+    if (!receipt) {
+      if (!['owner', 'admin'].includes(actor.role))
+        fail(
+          'PURCHASE_ORDER_REQUIRED',
+          'Phiếu nhập mua phải được tạo từ đơn mua; quản lý kho chỉ nhận sau khi kế toán duyệt.',
+          403,
+        )
+      return
+    }
+    const order = requireRecord(
+      'purchase_orders',
+      actor.tenantId,
+      receipt.purchase_order_id,
+      'Đơn mua hàng',
+    )
+    if (!['approved', 'partial'].includes(order.status))
+      fail('PURCHASE_NOT_APPROVED', 'Đơn mua chưa được kế toán duyệt.', 409)
+    if (!actor.permissions.includes('purchaseOrder.receive'))
+      fail('FORBIDDEN', 'Chỉ quản lý kho mới được ghi nhận phiếu nhận theo đơn mua.', 403)
+  }
+
   const consumeReservations = (actor, document, line) => {
     const allocations = all(
       'SELECT * FROM reservation_allocations WHERE tenant_id=? AND document_line_id=?',
@@ -799,6 +827,7 @@ export function createInventory(db) {
     keys(filters, ['warehouseId', 'skuId', 'ledgerLimit', 'beforeSequence'])
     const tenant = record(get('SELECT * FROM tenants WHERE id = ?', actor.tenantId))
     tenant.config = configuration(actor.tenantId)
+    const actorPermissions = permissionsForUser(db, actor.tenantId, actor.userId, actor.role)
     const rows = (table, order = '') =>
       all(`SELECT * FROM ${table} WHERE tenant_id = ? ${order}`, actor.tenantId).map(record)
     const warehouses = rows('warehouses', 'ORDER BY code')
@@ -868,6 +897,44 @@ export function createInventory(db) {
           .map((link) => link.documentId),
       }),
     )
+    const requestRows = actorPermissions.includes('purchaseRequest.manage')
+      ? rows('stock_restock_requests', 'ORDER BY created_at DESC,id DESC')
+      : actorPermissions.includes('purchaseRequest.read')
+        ? all(
+            'SELECT * FROM stock_restock_requests WHERE tenant_id=? AND created_by=? ORDER BY created_at DESC,id DESC',
+            actor.tenantId,
+            actor.userId,
+          ).map(record)
+        : []
+    const requestLines = rows(
+      'stock_restock_request_lines',
+      'ORDER BY request_id,line_number',
+    )
+    const purchaseRequests = requestRows.map((request) => {
+      const order = get(
+        "SELECT id,number,status FROM purchase_orders WHERE tenant_id=? AND restock_request_id=? AND status!='cancelled' ORDER BY created_at DESC,id DESC LIMIT 1",
+        actor.tenantId,
+        request.id,
+      )
+      const status = order
+        ? order.status === 'draft'
+          ? 'proposed'
+          : order.status
+        : request.status
+      return {
+        ...request,
+        status,
+        purchaseOrderId: order?.id ?? null,
+        purchaseOrderNumber: order?.number ?? null,
+        lines: requestLines
+          .filter((line) => line.requestId === request.id)
+          .map((line) => ({
+            id: line.id,
+            skuId: line.skuId,
+            requestedQuantity: line.requestedQuantity,
+          })),
+      }
+    })
     const returnSources = rows('stock_document_returns')
     const documents = rows('stock_documents', 'ORDER BY created_at DESC,id DESC').map((row) => ({
       ...row,
@@ -983,7 +1050,7 @@ export function createInventory(db) {
     return {
       tenant,
       actor: { userId: actor.userId, role: actor.role },
-      permissions: permissionsForUser(db, actor.tenantId, actor.userId, actor.role),
+      permissions: actorPermissions,
       ...sales.snapshot(actor),
       warehouses,
       locations,
@@ -991,7 +1058,14 @@ export function createInventory(db) {
       skus,
       balances,
       documents,
-      purchaseOrders,
+      purchaseRequests,
+      purchaseOrders: actorPermissions.some((permission) =>
+        ['purchaseOrder.create', 'purchaseOrder.approve', 'purchaseOrder.cancel', 'purchaseOrder.receive'].includes(
+          permission,
+        ),
+      )
+        ? purchaseOrders
+        : [],
       ledger,
       reservations,
       counts,
@@ -1260,17 +1334,120 @@ export function createInventory(db) {
         )
       return { id: row.id }
     }
+    if (action === 'purchaseRequest.create') {
+      keys(input, ['warehouseId', 'sourceReference', 'note', 'lines'])
+      warehouse(actor, input.warehouseId)
+      if (!Array.isArray(input.lines) || input.lines.length < 1 || input.lines.length > 100)
+        fail('INVALID_INPUT', 'Yêu cầu nhập hàng cần từ 1 đến 100 dòng.')
+      const requestId = id()
+      const number = `RR-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${requestId.slice(0, 8).toUpperCase()}`
+      run(
+        'INSERT INTO stock_restock_requests(id,tenant_id,number,warehouse_id,source_reference,note,created_by,created_at) VALUES (?,?,?,?,?,?,?,?)',
+        requestId,
+        tenantId,
+        number,
+        input.warehouseId,
+        text(input.sourceReference ?? '', 'Tham chiếu nguồn', 0, 200),
+        text(input.note ?? '', 'Ghi chú', 0, 2000),
+        actor.userId,
+        now(),
+      )
+      const seen = new Set()
+      for (const [index, line] of input.lines.entries()) {
+        keys(line, ['skuId', 'requestedQuantity'])
+        const product = sku(actor, line.skuId)
+        if (seen.has(product.id)) fail('DUPLICATE_LINE', 'SKU bị trùng trong yêu cầu nhập hàng.')
+        seen.add(product.id)
+        const quantity = integer(line.requestedQuantity, 'Số lượng cần bổ sung', 1, 1000000000)
+        const availability = all(
+          'SELECT on_hand,reserved,damaged,warranty FROM balances WHERE tenant_id=? AND warehouse_id=? AND sku_id=?',
+          tenantId,
+          input.warehouseId,
+          product.id,
+        ).reduce(
+          (total, balance) =>
+            add(total, balance.on_hand - balance.reserved - balance.damaged - balance.warranty),
+          0,
+        )
+        if (availability >= quantity)
+          fail(
+            'STOCK_AVAILABLE',
+            `Kho vẫn còn đủ hàng ${product.sku}; chỉ gửi yêu cầu khi số cần bổ sung vượt tồn khả dụng.`,
+            409,
+          )
+        run(
+          'INSERT INTO stock_restock_request_lines(id,tenant_id,request_id,sku_id,line_number,requested_quantity) VALUES (?,?,?,?,?,?)',
+          id(),
+          tenantId,
+          requestId,
+          product.id,
+          index + 1,
+          quantity,
+        )
+      }
+      return { id: requestId, number }
+    }
     if (action === 'purchaseOrder.create') {
-      keys(input, ['warehouseId', 'supplierId', 'reference', 'note', 'lines'])
+      keys(input, [
+        'warehouseId',
+        'supplierId',
+        'reference',
+        'note',
+        'lines',
+        'restockRequestId',
+      ])
       warehouse(actor, input.warehouseId)
       const supplier = requireRecord('suppliers', tenantId, input.supplierId, 'Nhà cung cấp')
       if (!supplier.active) fail('SUPPLIER_INACTIVE', 'Nhà cung cấp đã ngừng hoạt động.')
       if (!Array.isArray(input.lines) || input.lines.length < 1 || input.lines.length > 200)
         fail('INVALID_INPUT', 'Đơn mua cần từ 1 đến 200 dòng hàng.')
+      let restockRequest = null
+      if (input.restockRequestId !== undefined) {
+        restockRequest = requireRecord(
+          'stock_restock_requests',
+          tenantId,
+          input.restockRequestId,
+          'Yêu cầu nhập hàng',
+        )
+        if (restockRequest.status !== 'open')
+          fail('INVALID_TRANSITION', 'Yêu cầu nhập hàng đã được xử lý.', 409)
+        if (restockRequest.warehouse_id !== input.warehouseId)
+          fail('WAREHOUSE_MISMATCH', 'Đơn mua phải nhập vào kho trong yêu cầu.', 409)
+        if (
+          get(
+            "SELECT 1 FROM purchase_orders WHERE tenant_id=? AND restock_request_id=? AND status!='cancelled'",
+            tenantId,
+            restockRequest.id,
+          )
+        )
+          fail('REQUEST_ALREADY_PROPOSED', 'Yêu cầu đã có đơn mua hàng.', 409)
+        const requestedLines = all(
+          'SELECT sku_id,requested_quantity FROM stock_restock_request_lines WHERE tenant_id=? AND request_id=?',
+          tenantId,
+          restockRequest.id,
+        )
+        const proposedQuantities = new Map()
+        for (const line of input.lines) {
+          if (!line || typeof line !== 'object' || Array.isArray(line)) continue
+          const skuId = text(line.skuId, 'SKU', 1, 200)
+          const quantity = integer(line.quantity, 'Số lượng đặt', 1, 1000000000)
+          proposedQuantities.set(skuId, (proposedQuantities.get(skuId) ?? 0) + quantity)
+        }
+        if (
+          requestedLines.some(
+            (line) => (proposedQuantities.get(line.sku_id) ?? 0) < line.requested_quantity,
+          )
+        )
+          fail(
+            'REQUEST_LINES_INCOMPLETE',
+            'Đơn mua phải bao gồm đầy đủ mặt hàng và số lượng đã yêu cầu.',
+            409,
+          )
+      }
       const entityId = id()
       const number = `PO-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${entityId.slice(0, 8).toUpperCase()}`
       run(
-        'INSERT INTO purchase_orders(id,tenant_id,number,warehouse_id,supplier_id,reference,note,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO purchase_orders(id,tenant_id,number,warehouse_id,supplier_id,reference,note,created_by,created_at,restock_request_id) VALUES (?,?,?,?,?,?,?,?,?,?)',
         entityId,
         tenantId,
         number,
@@ -1280,6 +1457,7 @@ export function createInventory(db) {
         text(input.note ?? '', 'Ghi chú', 0, 2000),
         actor.userId,
         now(),
+        restockRequest?.id ?? null,
       )
       const seen = new Set()
       for (const [index, line] of input.lines.entries()) {
@@ -1312,6 +1490,8 @@ export function createInventory(db) {
       if (action === 'purchaseOrder.approve') {
         if (order.status !== 'draft')
           fail('INVALID_TRANSITION', 'Chỉ đơn mua nháp được duyệt.', 409)
+        if (order.created_by === actor.userId && actor.role !== 'owner')
+          fail('SELF_APPROVAL', 'Người lập đơn mua không thể tự phê duyệt.', 403)
         warehouse(actor, order.warehouse_id)
         const supplier = requireRecord('suppliers', tenantId, order.supplier_id, 'Nhà cung cấp')
         if (!supplier.active) fail('SUPPLIER_INACTIVE', 'Nhà cung cấp đã ngừng hoạt động.')
@@ -1466,6 +1646,12 @@ export function createInventory(db) {
       const returning = own(input, 'returnToStock') ? bool(input.returnToStock, 'Nhập hàng trả') : 0
       if (returning && input.type !== 'receipt')
         fail('INVALID_INPUT', 'Nhập hàng trả chỉ dùng phiếu nhập.')
+      if (input.type === 'receipt' && !returning && !['owner', 'admin'].includes(actor.role))
+        fail(
+          'PURCHASE_ORDER_REQUIRED',
+          'Phiếu nhập mua phải được tạo từ đơn mua đã được kế toán duyệt.',
+          403,
+        )
       if (returning) {
         const source = requireRecord(
           'stock_documents',
@@ -1645,6 +1831,7 @@ export function createInventory(db) {
     ) {
       keys(input, ['id'])
       const document = requireRecord('stock_documents', tenantId, input.id, 'Phiếu kho')
+      authorizePurchaseReceipt(actor, document)
       if (actor.role === 'receiver' && !['receipt', 'transfer'].includes(document.type))
         fail('FORBIDDEN', 'Nhân viên nhận hàng chỉ duyệt/ghi sổ phiếu nhập hoặc chuyển kho.', 403)
       if (action === 'document.approve') {

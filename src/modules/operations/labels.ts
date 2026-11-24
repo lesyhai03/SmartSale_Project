@@ -43,6 +43,7 @@ const VI: Record<string, string> = {
   telegram: 'Telegram',
   livechat: 'Chat trực tuyến',
   email: 'Email',
+  Accounting: 'Kế toán',
 }
 const EN: Record<string, string> = {
   lead: 'Lead',
@@ -89,6 +90,7 @@ const EN: Record<string, string> = {
   telegram: 'Telegram',
   livechat: 'Live Chat',
   email: 'Email',
+  Accounting: 'Accounting',
 }
 export const operationLabel = (key: string, locale: 'vi' | 'en') =>
   (locale === 'vi' ? VI[key] : EN[key]) || key

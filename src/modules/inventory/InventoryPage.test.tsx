@@ -95,6 +95,7 @@ const snapshot = (): InventorySnapshot => ({
     },
   ],
   documents: [],
+  purchaseRequests: [],
   purchaseOrders: [],
   salesOrders: [],
   ledger: [],
@@ -480,6 +481,28 @@ describe('Inventory workspace', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('Máy chủ đã xác nhận')
   })
 
+  it('does not offer standalone purchase receipts to warehouse managers', async () => {
+    const data = snapshot()
+    data.actor.role = 'manager'
+    data.permissions.push('purchaseOrder.receive')
+    vi.mocked(inventoryService.load).mockResolvedValue(data)
+    const user = userEvent.setup()
+
+    render(<InventoryPage />)
+    await screen.findByText('Công ty A')
+
+    expect(screen.queryByRole('button', { name: 'Nhập thêm hàng' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Tạo chứng từ' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Tạo chứng từ kho' }))
+    const type = dialog.getByRole('combobox', { name: 'Loại chứng từ' })
+    expect(type).toHaveValue('issue')
+
+    await user.selectOptions(type, 'receipt')
+    expect(dialog.getByRole('combobox', { name: 'Phiếu xuất gốc đã ghi sổ' })).toBeRequired()
+    expect(dialog.getByText(/chỉ dùng cho hàng khách trả/)).toBeInTheDocument()
+    expect(dialog.queryByRole('combobox', { name: 'Nhà cung cấp' })).not.toBeInTheDocument()
+  })
+
   it('reserves stock at the selected warehouse location', async () => {
     const data = snapshot()
     data.permissions.push('reservation.create')
@@ -738,6 +761,103 @@ describe('Inventory workspace', () => {
       }),
     )
     expect(await screen.findByText('PO-1001')).toBeInTheDocument()
+  })
+
+  it('creates a restock request directly from the warehouse purchase tab', async () => {
+    const data = snapshot()
+    data.permissions.push('purchaseRequest.create', 'purchaseRequest.read')
+    vi.mocked(inventoryService.load).mockResolvedValue(data)
+    vi.mocked(inventoryService.command).mockResolvedValue({
+      ...data,
+      purchaseRequests: [
+        {
+          id: 'request-new',
+          number: 'RR-20261117-002',
+          warehouseId: 'warehouse-a',
+          status: 'open',
+          sourceReference: '',
+          note: 'Tồn kho sắp hết',
+          createdBy: 'user-a',
+          createdAt: '2026-11-17T09:00:00Z',
+          purchaseOrderId: null,
+          purchaseOrderNumber: null,
+          lines: [{ id: 'request-line-new', skuId: 'sku-a', requestedQuantity: 8 }],
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    render(<InventoryPage />)
+    await screen.findByText('Công ty A')
+    await user.click(screen.getByRole('button', { name: 'Đơn mua hàng' }))
+    await user.click(screen.getByRole('button', { name: 'Tạo yêu cầu nhập hàng' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Tạo yêu cầu nhập hàng' }))
+    await dialog.findByRole('combobox', { name: 'Kho cần bổ sung' })
+    await user.selectOptions(dialog.getByRole('combobox', { name: 'Kho cần bổ sung' }), 'warehouse-a')
+    await user.selectOptions(dialog.getByRole('combobox', { name: 'Sản phẩm 1' }), 'sku-a')
+    await user.clear(dialog.getByRole('spinbutton', { name: 'Tổng số lượng cần có' }))
+    await user.type(dialog.getByRole('spinbutton', { name: 'Tổng số lượng cần có' }), '8')
+    await user.type(dialog.getByRole('textbox', { name: 'Ghi chú' }), 'Tồn kho sắp hết')
+    await user.click(dialog.getByRole('button', { name: 'Tạo yêu cầu' }))
+    await waitFor(() =>
+      expect(inventoryService.command).toHaveBeenCalledWith('purchaseRequest.create', {
+        warehouseId: 'warehouse-a',
+        sourceReference: '',
+        note: 'Tồn kho sắp hết',
+        lines: [{ skuId: 'sku-a', requestedQuantity: 8 }],
+      }),
+    )
+    expect(await screen.findByText('RR-20261117-002')).toBeInTheDocument()
+  })
+
+  it('lets a manager create a purchase proposal from a restock request', async () => {
+    const data = snapshot()
+    data.permissions.push(
+      'purchaseRequest.read',
+      'purchaseRequest.manage',
+      'purchaseOrder.create',
+    )
+    data.suppliers.push({ id: 'supplier-a', code: 'SUP-1', name: 'Lumi Supply', active: true })
+    data.purchaseRequests = [
+      {
+        id: 'request-a',
+        number: 'RR-20261117-001',
+        warehouseId: 'warehouse-a',
+        status: 'open',
+        sourceReference: 'conversation:conv-1',
+        note: '',
+        createdBy: 'staff-a',
+        createdAt: '2026-11-17T09:00:00Z',
+        purchaseOrderId: null,
+        purchaseOrderNumber: null,
+        lines: [{ id: 'request-line-a', skuId: 'sku-a', requestedQuantity: 4 }],
+      },
+    ]
+    vi.mocked(inventoryService.load).mockResolvedValue(data)
+    vi.mocked(inventoryService.command).mockResolvedValue({
+      ...data,
+      purchaseOrders: [purchaseOrderFixture()],
+    })
+    const user = userEvent.setup()
+    render(<InventoryPage />)
+    await screen.findByText('Công ty A')
+    await user.click(screen.getByRole('button', { name: 'Đơn mua hàng' }))
+    await user.click(screen.getByRole('button', { name: 'Lập đề xuất mua' }))
+    const dialog = within(screen.getByRole('dialog', { name: 'Tạo đơn mua hàng' }))
+    await user.selectOptions(dialog.getByRole('combobox', { name: 'Nhà cung cấp' }), 'supplier-a')
+    expect(dialog.getByRole('spinbutton', { name: 'Số lượng đặt' })).toHaveValue(4)
+    await user.type(dialog.getByRole('spinbutton', { name: 'Giá vốn / đơn vị (VND)' }), '250000')
+    await user.click(dialog.getByRole('button', { name: 'Tạo đơn nháp' }))
+    await waitFor(() =>
+      expect(inventoryService.command).toHaveBeenCalledWith(
+        'purchaseOrder.create',
+        expect.objectContaining({
+          warehouseId: 'warehouse-a',
+          supplierId: 'supplier-a',
+          restockRequestId: 'request-a',
+          lines: [{ skuId: 'sku-a', quantity: 4, unitCost: 250000 }],
+        }),
+      ),
+    )
   })
 
   it('approves and cancels purchase orders through permissioned commands', async () => {

@@ -114,6 +114,31 @@ export interface PurchaseOrder {
   lines: PurchaseOrderLine[]
   receiptDocumentIds: string[]
 }
+export interface StockRestockRequestLine {
+  id: string
+  skuId: string
+  requestedQuantity: number
+}
+export type StockRestockRequestStatus =
+  | 'open'
+  | 'proposed'
+  | 'approved'
+  | 'partial'
+  | 'received'
+  | 'cancelled'
+export interface StockRestockRequest {
+  id: string
+  number: string
+  warehouseId: string
+  status: StockRestockRequestStatus
+  sourceReference: string
+  note: string
+  createdBy: string
+  createdAt: string
+  purchaseOrderId: string | null
+  purchaseOrderNumber: string | null
+  lines: StockRestockRequestLine[]
+}
 export interface StockLedgerEntry {
   id: string
   sequence: number
@@ -238,6 +263,7 @@ export interface InventorySnapshot {
   skus: InventorySku[]
   balances: StockBalance[]
   documents: StockDocument[]
+  purchaseRequests: StockRestockRequest[]
   purchaseOrders: PurchaseOrder[]
   salesOrders: InventorySalesOrder[]
   ledger: StockLedgerEntry[]

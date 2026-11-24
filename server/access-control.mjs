@@ -22,6 +22,9 @@ const inventoryActions = [
   'document.transfer_receive',
   'reservation.create',
   'reservation.release',
+  'purchaseRequest.create',
+  'purchaseRequest.read',
+  'purchaseRequest.manage',
   'purchaseOrder.create',
   'purchaseOrder.approve',
   'purchaseOrder.cancel',
@@ -42,8 +45,8 @@ const basicActions = [
   'count.record',
   'warranty.create',
   'warranty.transition',
-  'purchaseOrder.create',
-  'purchaseOrder.receive',
+  'purchaseRequest.create',
+  'purchaseRequest.read',
 ]
 const salesManagerActions = [...SALES_ACTIONS]
 const salesOperationalActions = ['salesOrder.create', 'salesOrder.confirm', 'salesOrder.cancel']
@@ -58,23 +61,29 @@ const businessActions = [
   'logistics.manage',
   'care.manage',
 ]
+const accountingActions = ['accounting.read', 'accounting.post']
 
-export const ALL_PERMISSIONS = [...inventoryActions, ...SALES_ACTIONS, ...businessActions]
+export const ALL_PERMISSIONS = [
+  ...inventoryActions,
+  ...SALES_ACTIONS,
+  ...businessActions,
+  ...accountingActions,
+]
 export const DEFAULT_ROLE_PERMISSIONS = {
   owner: ALL_PERMISSIONS,
-  admin: ALL_PERMISSIONS,
-  manager: ALL_PERMISSIONS.filter((permission) => permission !== 'config.update'),
+  admin: ['operations.read', 'inbox.read', 'accounting.read'],
+  manager: ALL_PERMISSIONS.filter(
+    (permission) =>
+      !['config.update', 'accounting.post', 'purchaseOrder.approve'].includes(permission),
+  ),
+  accountant: ['purchaseOrder.approve', 'accounting.read'],
   receiver: [
     'sku.create',
     'sku.update',
     'sku.import',
-    'document.create',
-    'document.approve',
-    'document.post',
     'document.transfer_receive',
     'warranty.create',
     'warranty.transition',
-    'purchaseOrder.receive',
   ],
   staff: basicActions,
   issuer: salesOperationalActions,
@@ -85,13 +94,10 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     'document.cancel',
     'document.transfer_receive',
     'count.approve',
-    'purchaseOrder.approve',
-    'purchaseOrder.cancel',
   ],
   viewer: [],
 }
 DEFAULT_ROLE_PERMISSIONS.owner = [...DEFAULT_ROLE_PERMISSIONS.owner, ...businessActions]
-DEFAULT_ROLE_PERMISSIONS.admin = [...DEFAULT_ROLE_PERMISSIONS.admin, ...businessActions]
 DEFAULT_ROLE_PERMISSIONS.manager = [...DEFAULT_ROLE_PERMISSIONS.manager, ...businessActions]
 DEFAULT_ROLE_PERMISSIONS.staff = [
   ...DEFAULT_ROLE_PERMISSIONS.staff,

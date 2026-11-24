@@ -67,13 +67,17 @@ function open(path = '/dashboard', width = 1440) {
 }
 
 describe('Business overview integration', () => {
+  const mainNavigation = () =>
+    within(
+      screen.getByRole('navigation', { name: /Main navigation|Điều hướng chính/ }),
+    )
+
   it.each(['/', '/unknown-page'])('opens the overview as the landing page for %s', async (path) => {
     open(path)
     await screen.findByRole('main', { name: 'Business overview' })
-    expect(screen.getByRole('button', { name: 'Dashboard' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    expect(
+      mainNavigation().getByRole('link', { name: /Dashboard|Tổng quan/ }),
+    ).toHaveAttribute('aria-current', 'page')
   })
 
   it('shows an initial load failure and retries the same service instead of inserting fallback data', async () => {
@@ -92,10 +96,10 @@ describe('Business overview integration', () => {
   it('opens the overview through the Inbox sidebar and keeps VI/EN navigation consistent', async () => {
     const user = open('/inbox')
     await screen.findByRole('main', { name: 'Conversation workspace' })
-    const nav = within(screen.getByRole('navigation', { name: 'Main navigation' }))
-    await user.click(nav.getByRole('button', { name: 'Dashboard' }))
+    const nav = mainNavigation()
+    await user.click(nav.getByRole('link', { name: 'Dashboard' }))
     await screen.findByRole('main', { name: 'Business overview' })
-    expect(screen.getByRole('button', { name: 'Dashboard' })).toHaveAttribute(
+    expect(mainNavigation().getByRole('link', { name: /Dashboard|Tổng quan/ })).toHaveAttribute(
       'aria-current',
       'page',
     )
@@ -103,10 +107,9 @@ describe('Business overview integration', () => {
     await user.click(screen.getByRole('button', { name: 'Tiếng Việt' }))
     await screen.findByRole('main', { name: 'Tổng quan kinh doanh' })
     expect(screen.getByRole('heading', { name: /^Tổng quan/, level: 1 })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Tổng quan' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    expect(
+      mainNavigation().getByRole('link', { name: /Tổng quan|Dashboard/ }),
+    ).toHaveAttribute('aria-current', 'page')
     expect(document.title).toBe('Tổng quan · SmartSales Suite')
   })
 
@@ -149,15 +152,15 @@ describe('Business overview integration', () => {
     const user = open('/inbox', 390)
     await screen.findByRole('main', { name: 'Conversation workspace' })
     await user.click(screen.getByRole('button', { name: 'Open inbox navigation' }))
-    const link = await screen.findByRole('link', { name: 'Dashboard' })
+    const inboxNavigation = within(screen.getByLabelText('Inbox navigation'))
+    const link = await inboxNavigation.findByRole('link', { name: 'Dashboard' })
     expect(link).toHaveAttribute('href', '/dashboard')
     link.focus()
     await user.keyboard('{Enter}')
     await screen.findByRole('main', { name: 'Business overview' })
-    expect(screen.getByRole('button', { name: 'Dashboard' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    )
+    expect(
+      mainNavigation().getByRole('link', { name: /Dashboard|Tổng quan/ }),
+    ).toHaveAttribute('aria-current', 'page')
   })
 
   it('opens the exact order selected from the recent-order list', async () => {

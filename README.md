@@ -104,3 +104,5 @@ npm run build
 ## Tài liệu
 
 [API](docs/api-contract.md) · [Kiến trúc](docs/architecture.md) · [API kho](docs/inventory-api.md) · [Kịch bản Demo](docs/demo-walkthrough.md)
+
+Test git log
